@@ -1,0 +1,5 @@
+[workspace]
+members = [
+  "gold-daemon",
+  "gold-randomhash"
+, "gold-structures"]
