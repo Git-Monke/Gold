@@ -19,11 +19,13 @@ use whirlpool::Whirlpool;
 use digest::{Digest, DynDigest};
 
 mod murmur3;
+mod transforms;
+
+use murmur3::Checksum;
+use rand_mt;
 
 struct RandomHash {
     algs: Vec<Box<dyn DynDigest>>,
-    n: usize,
-    m: usize,
 }
 
 impl RandomHash {
@@ -50,24 +52,6 @@ impl RandomHash {
             Box::new(Whirlpool::new()),
         ];
 
-        RandomHash {
-            algs,
-            n: 5,
-            m: 10_000,
-        }
-    }
-}
-
-trait Checksum {
-    fn checksum(&self) -> &[u8];
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_murmur3() {
-        assert_eq!(murmur3::murmur3_32(b"", 1), 1_364_076_727)
+        RandomHash { algs }
     }
 }

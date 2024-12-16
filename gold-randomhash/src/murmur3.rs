@@ -44,3 +44,18 @@ fn remainder_to_u32(buffer: &[u8]) -> u32 {
         _ => unreachable!(),
     }
 }
+pub trait Checksum {
+    fn checksum(&self) -> u32;
+}
+
+impl Checksum for &[u8] {
+    fn checksum(&self) -> u32 {
+        murmur3_32(self, 1)
+    }
+}
+
+impl Checksum for [u8] {
+    fn checksum(&self) -> u32 {
+        murmur3_32(self, 1)
+    }
+}
