@@ -1,0 +1,14 @@
+[package]
+name = "gold-pans"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+criterion = "0.5.1"
+digest = "0.10.7"
+hex = "0.4.3"
+shabal = "0.4.1"
+
+[[bench]]
+name = "nonce_benchmark"
+harness = false
