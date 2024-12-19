@@ -1,15 +1,13 @@
-use std::{io, path::Path};
+use std::{
+    f32::consts::E,
+    io::{self, Error},
+    path::Path,
+};
 
-use gold_pans::PanBuilder;
+use gold_pans::{get_base_path, plot};
 use hex;
 
-fn main() -> Result<(), io::Error> {
-    let mut builder = PanBuilder::new(
-        [0; 33],
-        Path::new("/Users/jacobvelasquez/projects/Gold/gold-pans/data"),
-    );
-
-    builder.plot_space(0, 100_000_000)?;
-
-    Ok(())
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let path = get_base_path()?;
+    plot(100, &[0; 33], 4)
 }
