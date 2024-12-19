@@ -3,7 +3,8 @@ use std::{
     error::Error,
     fs::{self, File},
     io::{BufReader, BufWriter, Read, Write},
-    path::PathBuf,
+    ops::{Shr, ShrAssign},
+    path::{Display, PathBuf},
     usize,
 };
 
@@ -47,6 +48,33 @@ pub fn get_base_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
     Err(Box::new(PlottingError::InaccessibleBasePath))
 }
 
+pub fn verify_deadline(pk: &[u8; 33], dl: &Deadline) -> bool {
+    let nonce = generate_nonce(pk, dl.nonce as usize, dl.filter_level);
+
+    let mut shabal = Shabal256::new();
+    shabal.update(&nonce[0..(NONCE_SIZE - 8)]);
+    let nonce_hash = shabal.finalize();
+
+    let mut shabal = Shabal256::new();
+    shabal.update(dl.p_gen_sig);
+    shabal.update(dl.block_height.to_be_bytes());
+    let challenge = shabal.finalize();
+
+    let scoop = (BigUint::from_bytes_be(&challenge) % SCOOPS)
+        .iter_u32_digits()
+        .next()
+        .unwrap_or(0) as usize;
+
+    let scoop_start = scoop * SCOOP_SIZE;
+    let scoop_data = &nonce[scoop_start..(scoop_start + SCOOP_SIZE)];
+
+    let calculated_deadline =
+        calculate_deadline(&scoop_data, &challenge, dl.filter_level, dl.difficulty);
+
+    return calculated_deadline == dl.value
+        && get_bucket(&challenge, dl.filter_level) == get_bucket(&nonce_hash, dl.filter_level);
+}
+
 pub fn plot(
     num_nonces: usize,
     pk: &[u8; 33],
@@ -86,7 +114,13 @@ pub fn plot(
 }
 
 fn get_bucket(bytes: &[u8], filter_level: u32) -> u32 {
-    u32::from_be_bytes(bytes[0..4].try_into().expect("Should never fail")) >> (32 - filter_level)
+    match filter_level {
+        0 => 0,
+        _ => {
+            u32::from_be_bytes(bytes[0..4].try_into().expect("Should never fail"))
+                >> (32 - filter_level)
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -96,6 +130,21 @@ pub struct Deadline {
     nonce: u64,
     filter_level: u32,
     value: u64,
+    difficulty: u64,
+}
+
+impl std::fmt::Display for Deadline {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Deadline(\n")?;
+        write!(f, "\tPrevious Gen Sig: {}\n", hex::encode(self.p_gen_sig))?;
+        write!(f, "\tBlock Height: {}\n", self.block_height)?;
+        write!(f, "\tNonce: {}\n", self.nonce)?;
+        write!(f, "\tFilter Level: {}\n", self.filter_level)?;
+        write!(f, "\tValue: {}\n", self.value)?;
+        write!(f, "\tDifficulty: {}\n", self.difficulty)?;
+        write!(f, ")\n")?;
+        Ok(())
+    }
 }
 
 pub fn find_best_deadline(
@@ -109,7 +158,6 @@ pub fn find_best_deadline(
     let mut shabal = Shabal256::new();
     shabal.update(p_gen_sig);
     shabal.update(&block_height.to_be_bytes());
-
     let challenge = shabal.finalize();
 
     let bucket = get_bucket(&challenge, filter_level);
@@ -166,6 +214,7 @@ pub fn find_best_deadline(
         nonce: best_nonce,
         filter_level: filter_level,
         value: best_deadline,
+        difficulty,
     }))
 }
 
