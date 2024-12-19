@@ -2,14 +2,13 @@ use core::fmt;
 use std::{
     error::Error,
     fs::{self, File},
-    io::{self, BufReader, BufWriter, Read, Write},
-    path::{Path, PathBuf},
+    io::{BufReader, BufWriter, Read, Write},
+    path::PathBuf,
     usize,
 };
 
-use std::fmt::Display;
-
 use digest::Digest;
+use num_bigint::BigUint;
 use shabal::Shabal256;
 
 use directories::ProjectDirs;
@@ -51,7 +50,7 @@ pub fn get_base_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
 pub fn plot(
     num_nonces: usize,
     pk: &[u8; 33],
-    filter_level: usize,
+    filter_level: u32,
     location: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let location = match location {
@@ -73,7 +72,7 @@ pub fn plot(
     }
 
     for i in 0..num_nonces {
-        let nonce = generate_nonce(pk, i);
+        let nonce = generate_nonce(pk, i, filter_level);
         let mut shabal = Shabal256::new();
         // The last 8 bytes in this format are for the nonce ID. The hash is only of the nonce itself.
         shabal.update(&nonce[0..(NONCE_SIZE - 8)]);
@@ -86,65 +85,109 @@ pub fn plot(
     Ok(())
 }
 
-fn get_bucket(bytes: &[u8], filter_level: usize) -> u32 {
+fn get_bucket(bytes: &[u8], filter_level: u32) -> u32 {
     u32::from_be_bytes(bytes[0..4].try_into().expect("Should never fail")) >> (32 - filter_level)
 }
 
+#[derive(Debug)]
 pub struct Deadline {
-    p_gen_sig: &[u8; 33],
+    p_gen_sig: [u8; 33],
     block_height: usize,
     nonce: u64,
-    n: usize,
-    value: usize,
+    filter_level: u32,
+    value: u64,
 }
 
 pub fn find_best_deadline(
     p_gen_sig: &[u8; 33],
     block_height: usize,
-    filter_level: usize,
-) -> Result<Deadline, Box<dyn std::error::Error>> {
-    let filter_amount = 2_usize.pow(filter_level as u32);
+    difficulty: u64,
+    filter_level: u32,
+) -> Result<Option<Deadline>, Box<dyn std::error::Error>> {
     let base_path = get_base_path()?;
 
-    let shabal = Shabal256::new();
+    let mut shabal = Shabal256::new();
     shabal.update(p_gen_sig);
     shabal.update(&block_height.to_be_bytes());
+
     let challenge = shabal.finalize();
 
     let bucket = get_bucket(&challenge, filter_level);
-    let scoop = (u128::from_be_bytes(challenge[0..16].try_into()?) % SCOOPS as u128) as usize;
+    let scoop = (BigUint::from_bytes_be(&challenge) % SCOOPS)
+        .iter_u32_digits()
+        .next()
+        .unwrap_or(0) as usize;
 
-    let file = BufReader::new(File::open(
-        base_path.join(format!("{}.plt", bucket.to_string())),
-    )?);
+    let scoop_start = scoop * SCOOP_SIZE;
+
+    let path = base_path.join(format!("{}.plt", bucket.to_string()));
+
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    if fs::metadata(&path)?.len() < NONCE_SIZE as u64 {
+        return Ok(None);
+    }
+
+    let mut file = BufReader::new(File::open(path)?);
 
     let mut buffer = [0_u8; NONCE_SIZE];
 
     let mut best_nonce = 0;
-    let mut best_deadline = usize::MAX;
+    let mut best_deadline = u64::MAX;
 
     loop {
         match file.read(&mut buffer) {
             Ok(0) => break,
             Ok(NONCE_SIZE) => {
-                let nonce_data = &buffer[0..(NONCE_SIZE - 8)];
-                let nonce_num = &buffer[(NONCE_SIZE - 8)..NONCE_SIZE];
+                let scoop_data = &buffer[scoop_start..(scoop_start + SCOOP_SIZE)];
+                let nonce_num = u64::from_be_bytes(
+                    buffer[(NONCE_SIZE - 8)..NONCE_SIZE]
+                        .try_into()
+                        .expect("Should never fail!"),
+                );
+
+                let deadline = calculate_deadline(scoop_data, &challenge, filter_level, difficulty);
+
+                if deadline < best_deadline {
+                    best_nonce = nonce_num;
+                    best_deadline = deadline;
+                }
             }
-            Ok(n) => return Err(Box::new(PlottingError::InvalidFileSize)),
+            Ok(_) => return Err(Box::new(PlottingError::InvalidFileSize)),
             Err(e) => return Err(Box::new(e)),
         }
     }
 
-    Ok(Deadline {})
+    Ok(Some(Deadline {
+        p_gen_sig: p_gen_sig.clone(),
+        block_height: block_height,
+        nonce: best_nonce,
+        filter_level: filter_level,
+        value: best_deadline,
+    }))
 }
 
-pub fn generate_nonce(pub_key: &[u8; 33], nonce: usize) -> [u8; NONCE_SIZE] {
+fn calculate_deadline(scoop: &[u8], challenge: &[u8], filter_level: u32, difficulty: u64) -> u64 {
+    let mut shabal = Shabal256::new();
+    shabal.update(scoop);
+    shabal.update(challenge);
+
+    let hash = shabal.finalize().to_vec();
+    let hash = u64::from_be_bytes(hash[0..8].try_into().expect("Should never fail"));
+
+    hash / (difficulty * 2_u64.pow(filter_level))
+}
+
+pub fn generate_nonce(pub_key: &[u8; 33], nonce: usize, filter_level: u32) -> [u8; NONCE_SIZE] {
     let mut out = [0; NONCE_SIZE];
 
-    // The seed is the 33 byte vectorized public key + the nonce as a u64
-    let mut seed: [u8; 41] = [0; 41];
+    // The seed is the 33 byte pk + 8 byte nonce + 4 byte filter-level
+    let mut seed: [u8; 45] = [0; 45];
     seed[0..33].copy_from_slice(pub_key);
     seed[33..41].copy_from_slice(&(nonce as u64).to_le_bytes());
+    seed[41..45].copy_from_slice(&filter_level.to_be_bytes());
 
     // Each index is just the shabal hash of the 4096 bytes prior to itself concatenated with the seed
     for i in 0..(SCOOPS * 2) {
@@ -174,7 +217,7 @@ pub fn generate_nonce(pub_key: &[u8; 33], nonce: usize) -> [u8; NONCE_SIZE] {
         }
     }
 
-    out[NONCE_SIZE - 8..NONCE_SIZE].copy_from_slice(&nonce.to_le_bytes());
+    out[NONCE_SIZE - 8..NONCE_SIZE].copy_from_slice(&nonce.to_be_bytes());
 
     out
 }
