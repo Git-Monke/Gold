@@ -1,3 +1,4 @@
 [workspace]
 members = [
-  "gold-daemon", "gold-miner", "gold-pans", "gold-structures"]
+  "gold-daemon", "gold-miner", "gold-structures"]
+ß

@@ -13,4 +13,9 @@ This accepts that having three seperate programs means communication through a R
 # ADR 2 : Rust
 
 In the context of choosing a programming language for this topic
-I decided for the Rust programming language due to its extremely high performance with modern syntax features
+I decided for the Rust programming language due to its extremely high performance, low level control, and modern syntax features
+The alternative was a less performant but more flexible language (Java, Python), or a more performant but much harder language (C, C++)
+Rust provided the best of both worlds, allowing me strong low level control (which is necessary for the Farmer and Daemon) and high performance, while minimally hindering development speed.
+This does accept an inevitable hit in speed of development since rust is strongly typed, but this is easily outweighed by the benefits listed earlier.
+
+---
