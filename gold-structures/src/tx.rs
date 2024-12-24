@@ -15,9 +15,13 @@ pub use txid::Txid;
 pub use txinput::TxInput;
 pub use txoutput::TxOutput;
 
-use crate::Result;
 use crate::{byte_reader::ByteReader, compact::to_compact_bytes};
+use crate::{
+    compact::{self, from_compact_bytes},
+    Result,
+};
 
+#[derive(Debug)]
 pub struct Transaction {
     pub inputs: Vec<TxInput>,
     pub outputs: Vec<TxOutput>,
@@ -47,11 +51,18 @@ impl Transaction {
         buffer.into_boxed_slice()
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Result<Transaction> {
+    pub fn deserialize(bytes: &[u8]) -> Result<Transaction> {
         let byte_reader = ByteReader::new(bytes);
-        let inputs_byte_len = byte_reader.read(1)?[0] as usize;
+
+        let inputs_byte_len = compact::from_byte_reader(&byte_reader)?;
         let input_bytes = byte_reader.slice(inputs_byte_len)?;
         let inputs = TxInput::deseralize_inputs_from_byte_reader(input_bytes)?;
+
+        let outputs_byte_len = compact::from_byte_reader(&byte_reader)?;
+        let output_bytes = byte_reader.slice(outputs_byte_len)?;
+        let outputs = TxOutput::deseralize_outputs_from_byte_reader(output_bytes)?;
+
+        Ok(Transaction { inputs, outputs })
     }
 
     pub fn get_txid(&self) -> Hash {

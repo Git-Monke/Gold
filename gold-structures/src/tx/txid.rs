@@ -1,9 +1,9 @@
 use crate::Result;
 use std::ops::Deref;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 
-pub struct Txid([u8; 32]);
+pub struct Txid(pub [u8; 32]);
 
 impl Deref for Txid {
     type Target = [u8];
@@ -25,5 +25,23 @@ impl Txid {
         }
 
         Ok(Txid(bytes[0..32].try_into().unwrap()))
+    }
+}
+
+impl AsRef<[u8]> for Txid {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+// impl std::fmt::Display for Txid {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         write!(f, "{}", hex::encode(self))
+//     }
+// }
+
+impl std::fmt::Debug for Txid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(self))
     }
 }

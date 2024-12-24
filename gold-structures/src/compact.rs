@@ -1,3 +1,6 @@
+use crate::byte_reader::ByteReader;
+use crate::Result;
+
 pub fn to_compact_bytes(num: usize) -> Box<[u8]> {
     let bytes = num.to_le_bytes();
 
@@ -35,5 +38,16 @@ pub fn from_compact_bytes(bytes: &[u8]) -> usize {
         5 => u32::from_le_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]) as usize,
         9 => u64::from_le_bytes(bytes[1..9].try_into().expect("Cannot error")) as usize,
         _ => panic!("An invalid number of bytes was input to from_compact_bytes!"),
+    }
+}
+
+pub fn from_byte_reader(bytes: &ByteReader) -> Result<usize> {
+    let byte_count = bytes.current_byte()?;
+
+    match byte_count {
+        0..253 => Ok(bytes.read_byte()? as usize),
+        253 => Ok(from_compact_bytes(bytes.read(3)?)),
+        254 => Ok(from_compact_bytes(bytes.read(5)?)),
+        255 => Ok(from_compact_bytes(bytes.read(9)?)),
     }
 }

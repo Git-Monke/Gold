@@ -4,6 +4,8 @@ use super::txid::Txid;
 use crate::Result;
 use secp256k1::ecdsa::Signature;
 
+#[derive(Debug)]
+
 pub struct TxInput {
     pub txid: Txid,
     pub output_index: u8,
@@ -34,13 +36,13 @@ impl TxInput {
         buffer.into_boxed_slice()
     }
 
-    pub fn deseralize_inputs_from_byte_reader(mut bytes: ByteReader) -> Result<Vec<TxInput>> {
+    pub fn deseralize_inputs_from_byte_reader(bytes: ByteReader) -> Result<Vec<TxInput>> {
         let mut inputs = Vec::new();
 
         while bytes.data_left() {
             let txid = bytes.read(32)?;
-            let output_index = bytes.read(1)?[0];
-            let sig_count = bytes.read(1)?[0] as usize;
+            let output_index = bytes.read_byte()?;
+            let sig_count = bytes.read_byte()? as usize;
             let mut sigs = Vec::new();
 
             for _ in 0..sig_count {
