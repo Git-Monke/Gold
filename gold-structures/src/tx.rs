@@ -1,10 +1,11 @@
+use rand::{rngs::OsRng, Rng, RngCore};
 use secp256k1::{
     ecdsa::Signature,
     hashes::{
         sha256::{self, Hash},
-        Hash as HashTrait,
+        Hash as HashTrait, HashEngine,
     },
-    PublicKey,
+    Message, PublicKey, Secp256k1,
 };
 
 pub mod txid;
@@ -53,13 +54,16 @@ impl Transaction {
 
     pub fn deserialize(bytes: &[u8]) -> Result<Transaction> {
         let byte_reader = ByteReader::new(bytes);
+        Transaction::deserialize_from_byte_reader(&byte_reader)
+    }
 
-        let inputs_byte_len = compact::from_byte_reader(&byte_reader)?;
-        let input_bytes = byte_reader.slice(inputs_byte_len)?;
+    pub fn deserialize_from_byte_reader(bytes: &ByteReader) -> Result<Transaction> {
+        let inputs_byte_len = compact::from_byte_reader(bytes)?;
+        let input_bytes = bytes.slice(inputs_byte_len)?;
         let inputs = TxInput::deseralize_inputs_from_byte_reader(input_bytes)?;
 
-        let outputs_byte_len = compact::from_byte_reader(&byte_reader)?;
-        let output_bytes = byte_reader.slice(outputs_byte_len)?;
+        let outputs_byte_len = compact::from_byte_reader(bytes)?;
+        let output_bytes = bytes.slice(outputs_byte_len)?;
         let outputs = TxOutput::deseralize_outputs_from_byte_reader(output_bytes)?;
 
         Ok(Transaction { inputs, outputs })
@@ -93,4 +97,79 @@ impl Transaction {
 
         sha256::Hash::hash(&buffer)
     }
+
+    pub fn merkle_root(txs: &Vec<Transaction>) -> Hash {
+        if txs.len() == 0 {
+            panic!("Attempted to get merkle root of size 0 Vec")
+        }
+
+        let mut txids: Vec<Hash> = txs.into_iter().map(|t| t.get_txid()).collect();
+
+        if txids.len() % 2 == 1 {
+            txids.push(txids[txids.len() - 1].clone());
+        }
+
+        let mut current_hashes = txids;
+
+        while current_hashes.len() != 1 {
+            let mut new_hashes: Vec<Hash> = vec![];
+
+            for group in current_hashes.chunks(2) {
+                let mut new_data = [0; 64];
+                new_data[0..32].copy_from_slice(&group[0].to_byte_array());
+                new_data[32..64].copy_from_slice(&group[1].to_byte_array());
+                new_hashes.push(sha256::Hash::hash(&new_data));
+            }
+
+            current_hashes = new_hashes;
+        }
+
+        current_hashes[0]
+    }
+
+    // pub fn rand_transaction() -> Transaction {
+    //     let mut rand = rand::thread_rng();
+
+    //     let mut inputs = vec![];
+    //     let mut outputs = vec![];
+
+    //     let input_count: usize = rand.gen_range(0..4);
+    //     let output_count: usize = rand.gen_range(0..4);
+
+    //     for input in 0..input_count {
+    //         let secp = Secp256k1::new();
+    //         let (sk, pk) = secp.generate_keypair(&mut OsRng);
+    //         let mut buffer = [0_u8; 32];
+    //         rand.fill_bytes(&mut buffer);
+    //         let txid = Txid(buffer);
+
+    //         let input = TxInput {
+    //             txid,
+    //             output_index: rand.gen(),
+    //             sigs: vec![
+    //                 secp.sign_ecdsa(&Message::from_digest(Hash::hash(&[0]).to_byte_array()), &sk)
+    //             ],
+    //         };
+
+    //         inputs.push(input);
+    //     }
+
+    //     for output in 0..output_count {
+    //         let secp = Secp256k1::new();
+    //         let (sk, pk) = secp.generate_keypair(&mut OsRng);
+
+    //         let output = TxOutput {
+    //             amount: rand.gen(),
+    //             new_owners: vec![pk],
+    //             required_sigs: 1,
+    //         };
+
+    //         outputs.push(output);
+    //     }
+
+    //     let tx = Transaction {
+    //         inputs: vec![input],
+    //         outputs: vec![output],
+    //     };
+    // }
 }

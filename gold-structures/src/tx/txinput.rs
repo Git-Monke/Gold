@@ -1,7 +1,8 @@
 use crate::byte_reader::ByteReader;
 
-use super::txid::Txid;
+use super::{txid::Txid, Transaction};
 use crate::Result;
+use rand::Rng;
 use secp256k1::ecdsa::Signature;
 
 #[derive(Debug)]
