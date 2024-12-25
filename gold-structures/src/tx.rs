@@ -65,11 +65,26 @@ impl Transaction {
         Ok(Transaction { inputs, outputs })
     }
 
+    // get_txid does not include inputs signature data. get_hash does include sig data
     pub fn get_txid(&self) -> Hash {
         let mut buffer = Vec::new();
 
         for input in self.inputs.iter() {
             buffer.extend(input.serialize_without_sigs());
+        }
+
+        for output in self.outputs.iter() {
+            buffer.extend(output.serialize());
+        }
+
+        sha256::Hash::hash(&buffer)
+    }
+
+    pub fn get_hash(&self) -> Hash {
+        let mut buffer = Vec::new();
+
+        for input in self.inputs.iter() {
+            buffer.extend(input.serialize());
         }
 
         for output in self.outputs.iter() {

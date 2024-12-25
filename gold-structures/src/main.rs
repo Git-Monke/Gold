@@ -32,7 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let tx_deseralized = Transaction::deserialize(&out)?;
 
-    println!("{:?}", tx_deseralized);
+    println!("{:?}", tx_deseralized.get_txid());
 
     Ok(())
 }

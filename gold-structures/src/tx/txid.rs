@@ -34,12 +34,6 @@ impl AsRef<[u8]> for Txid {
     }
 }
 
-// impl std::fmt::Display for Txid {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         write!(f, "{}", hex::encode(self))
-//     }
-// }
-
 impl std::fmt::Debug for Txid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", hex::encode(self))
