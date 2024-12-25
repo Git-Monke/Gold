@@ -1,4 +1,4 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use secp256k1::hashes::sha256;
 use secp256k1::hashes::{sha256::Hash, Hash as Sha256Hash};

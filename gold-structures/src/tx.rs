@@ -5,7 +5,7 @@ use secp256k1::{
         sha256::{self, Hash},
         Hash as HashTrait, HashEngine,
     },
-    Message, PublicKey, Secp256k1,
+    Message, PublicKey, Secp256k1, SecretKey,
 };
 
 pub mod txid;
@@ -84,6 +84,11 @@ impl Transaction {
         sha256::Hash::hash(&buffer)
     }
 
+    pub fn sign(&self, sk: &SecretKey) -> Signature {
+        let secp256k1 = secp256k1::Secp256k1::signing_only();
+        secp256k1.sign_ecdsa(&Message::from_digest(self.get_txid().to_byte_array()), &sk)
+    }
+
     pub fn get_hash(&self) -> Hash {
         let mut buffer = Vec::new();
 
@@ -126,50 +131,4 @@ impl Transaction {
 
         current_hashes[0]
     }
-
-    // pub fn rand_transaction() -> Transaction {
-    //     let mut rand = rand::thread_rng();
-
-    //     let mut inputs = vec![];
-    //     let mut outputs = vec![];
-
-    //     let input_count: usize = rand.gen_range(0..4);
-    //     let output_count: usize = rand.gen_range(0..4);
-
-    //     for input in 0..input_count {
-    //         let secp = Secp256k1::new();
-    //         let (sk, pk) = secp.generate_keypair(&mut OsRng);
-    //         let mut buffer = [0_u8; 32];
-    //         rand.fill_bytes(&mut buffer);
-    //         let txid = Txid(buffer);
-
-    //         let input = TxInput {
-    //             txid,
-    //             output_index: rand.gen(),
-    //             sigs: vec![
-    //                 secp.sign_ecdsa(&Message::from_digest(Hash::hash(&[0]).to_byte_array()), &sk)
-    //             ],
-    //         };
-
-    //         inputs.push(input);
-    //     }
-
-    //     for output in 0..output_count {
-    //         let secp = Secp256k1::new();
-    //         let (sk, pk) = secp.generate_keypair(&mut OsRng);
-
-    //         let output = TxOutput {
-    //             amount: rand.gen(),
-    //             new_owners: vec![pk],
-    //             required_sigs: 1,
-    //         };
-
-    //         outputs.push(output);
-    //     }
-
-    //     let tx = Transaction {
-    //         inputs: vec![input],
-    //         outputs: vec![output],
-    //     };
-    // }
 }

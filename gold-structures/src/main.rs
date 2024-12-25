@@ -1,5 +1,3 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
 use gold_structures::block::Block;
 use gold_structures::tx::{Transaction, TxInput, TxOutput, Txid};
 use secp256k1::hashes::{sha256::Hash, Hash as HashTrait};
@@ -51,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data = new_block.serialize();
     let test_deser = Block::deserialize(&data)?;
 
-    println!("{:?}", test_deser);
+    println!("{:?}", hex::encode(data));
 
     Ok(())
 }
