@@ -4,6 +4,8 @@ pub enum Error {
     #[error("Generic {0}")]
     Generic(String),
 
+    // Blockchain Open Errors
+
     // Io
     #[error(transparent)]
     Io(#[from] std::io::Error),

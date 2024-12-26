@@ -1,38 +1,36 @@
-use secp256k1::{ecdsa::Signature, PublicKey};
+use std::{collections::HashMap, fs::File};
 
-mod error;
-mod prelude;
-mod utils;
+pub mod block;
+pub mod error;
+pub mod prelude;
+pub mod transaction;
+pub mod utils;
 
-// These aliases are so the code can describe itself. They get optimized away at compile time.
-type HashAsBytes = [u8; 32];
-type Txid = [u8; 32];
+use prelude::*;
 
-pub struct Block {
-    header: Header,
-    tx_list: Vec<Transaction>,
+pub type Txid = [u8; 32];
+pub type HashBytes = [u8; 32];
+
+pub struct UtxoId([u8; 33]);
+
+pub struct UtxoSet {
+    data: HashMap<UtxoId, transaction::TxOutput>,
 }
 
-pub struct Header {
-    prev_block_hash: HashAsBytes,
-    timestamp: u32,
-    merkle_root: HashAsBytes,
-    nonce: u32,
-}
+impl UtxoSet {
+    pub fn new() -> UtxoSet {
+        todo!()
+    }
 
-pub struct Transaction {
-    inputs: Vec<TxInput>,
-    outputs: Vec<TxOutput>,
-}
+    pub fn from_file(file: &File) -> UtxoSet {
+        todo!()
+    }
 
-pub struct TxInput {
-    txid: Txid,
-    index: u8,
-    sigs: Vec<Signature>,
-}
+    pub fn add_block(block: block::Block) -> Result<()> {
+        todo!()
+    }
 
-pub struct TxOutput {
-    amount: usize,
-    keys: Vec<PublicKey>,
-    sig_requirement: usize,
+    pub fn rollback_block(block: block::Block) -> Result<()> {
+        todo!()
+    }
 }
