@@ -229,7 +229,7 @@ fn opcode_do_nothing(script_state: &mut ScriptState) -> Result<(), ScriptFailure
 }
 
 fn opcode_dup(script_state: &mut ScriptState) -> Result<(), ScriptFailure> {
-    let mut stack = &mut script_state.stack;
+    let stack = &mut script_state.stack;
 
     if stack.len() == 0 {
         return Err(ScriptFailure::NotEnoughStackItems);
@@ -242,20 +242,19 @@ fn opcode_dup(script_state: &mut ScriptState) -> Result<(), ScriptFailure> {
 }
 
 fn opcode_drop(script_state: &mut ScriptState) -> Result<(), ScriptFailure> {
-    let mut stack = &mut script_state.stack;
+    let stack = &mut script_state.stack;
 
-    if stack.len() == 0 {
-        return Err(ScriptFailure::NotEnoughStackItems);
+    if stack.len() > 0 {
+        stack.pop();
     }
 
-    stack.pop();
     script_state.index += 1;
 
     Ok(())
 }
 
 fn opcode_verify(script_state: &mut ScriptState) -> Result<(), ScriptFailure> {
-    let mut stack = &mut script_state.stack;
+    let stack = &mut script_state.stack;
 
     if stack.len() == 0 {
         return Err(ScriptFailure::NotEnoughStackItems);

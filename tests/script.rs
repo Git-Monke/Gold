@@ -1,5 +1,3 @@
-use std::env::consts::OS;
-
 use gold::structs::*;
 use gold::txn::*;
 
@@ -368,10 +366,43 @@ fn test_op_push_next_byte_fail() {
 #[test]
 fn test_op_dup() {
     let locking_script = vec![218, 248];
-    // push a 1, duplicate it, check that the top two stack items are equal (both 1's)
     let unlocking_script = vec![18, 2, 2];
     let (utxo_set, txn) = construct_simple_txn_context(locking_script, unlocking_script);
     let script_state = validate_script(txn, 0, &utxo_set);
 
     assert!(script_state.is_ok());
+}
+
+#[test]
+fn test_op_drop() {
+    let locking_script = vec![219];
+    let unlocking_script = vec![18, 2, 2];
+    let (utxo_set, txn) = construct_simple_txn_context(locking_script, unlocking_script);
+    let script_state = evaluate_script(txn, 0, &utxo_set);
+
+    assert!(script_state.is_ok());
+    assert!(script_state.unwrap().stack.len() == 0);
+}
+
+#[test]
+fn test_op_verify() {
+    // pushes 2 1's, checks for equality, verifies
+    // If working properly, the stack should be empty
+    let locking_script = vec![1, 248, 220];
+    let unlocking_script = vec![1];
+    let (utxo_set, txn) = construct_simple_txn_context(locking_script, unlocking_script);
+    let script_state = evaluate_script(txn, 0, &utxo_set);
+
+    assert!(script_state.is_ok());
+    assert!(script_state.unwrap().stack.len() == 0);
+}
+
+#[test]
+fn test_op_verify_fail_branch() {
+    let locking_script = vec![2, 248, 220];
+    let unlocking_script = vec![1];
+    let (utxo_set, txn) = construct_simple_txn_context(locking_script, unlocking_script);
+    let script_state = evaluate_script(txn, 0, &utxo_set);
+
+    assert!(script_state.is_err());
 }
