@@ -460,3 +460,136 @@ fn test_checksig() {
     assert!(script_state.stack.len() == 1);
     assert!(script_state.stack[0][0] == 1);
 }
+
+// Todo: Break up this monster test into multiple smaller tests
+#[test]
+fn test_checksig_failures() {
+    let secp = secp256k1::Secp256k1::new();
+    let keypair = Keypair::new(&secp, &mut OsRng);
+    let pk = keypair.x_only_public_key();
+
+    let mut locking_script = vec![16 + 32];
+    locking_script.extend(pk.0.serialize().iter());
+    locking_script.push(237);
+
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, vec![]);
+
+    let mut txn = (*context.txn).clone();
+
+    // --- Invalid sig error ---
+
+    let mut unlocking_script = vec![80];
+    unlocking_script.extend(0..64);
+
+    txn.inputs[0].unlocking_script = unlocking_script;
+
+    let context = Context {
+        txn: Rc::new(txn),
+        blockheight: 1,
+        networktime: 1000,
+    };
+
+    let script_state = evaluate_script(&context, 0, &utxo_set);
+
+    assert!(script_state.is_ok());
+
+    let script_state = script_state.unwrap();
+
+    assert!(script_state.stack.len() == 1);
+    assert!(script_state.stack[0][0] == 0);
+
+    // --- Invalid pk error ---
+
+    let mut locking_script = vec![16 + 32];
+    locking_script.extend(0..32);
+    locking_script.push(237);
+
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, vec![]);
+
+    let mut txn = (*context.txn).clone();
+    let mut unlocking_script = vec![80];
+    unlocking_script.extend(0..64);
+
+    txn.inputs[0].unlocking_script = unlocking_script;
+
+    let context = Context {
+        txn: Rc::new(txn),
+        blockheight: 1,
+        networktime: 1000,
+    };
+
+    let script_state = evaluate_script(&context, 0, &utxo_set);
+
+    assert!(script_state.is_err());
+
+    // Invalid pk length (not 32 bytes) pushed to stack
+
+    let mut locking_script = vec![16 + 31];
+    locking_script.extend(0..31);
+    locking_script.push(237);
+
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, vec![]);
+
+    let mut txn = (*context.txn).clone();
+    let mut unlocking_script = vec![80];
+    unlocking_script.extend(0..64);
+
+    txn.inputs[0].unlocking_script = unlocking_script;
+
+    let context = Context {
+        txn: Rc::new(txn),
+        blockheight: 1,
+        networktime: 1000,
+    };
+
+    let script_state = evaluate_script(&context, 0, &utxo_set);
+
+    assert!(script_state.is_err());
+
+    // Invalid sig length (not 64 bytes) pushed to stack
+
+    let mut locking_script = vec![16 + 32];
+    locking_script.extend(0..32);
+    locking_script.push(237);
+
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, vec![]);
+
+    let mut txn = (*context.txn).clone();
+    let mut unlocking_script = vec![79];
+    unlocking_script.extend(0..63);
+
+    txn.inputs[0].unlocking_script = unlocking_script;
+
+    let context = Context {
+        txn: Rc::new(txn),
+        blockheight: 1,
+        networktime: 1000,
+    };
+
+    let script_state = evaluate_script(&context, 0, &utxo_set);
+
+    assert!(script_state.is_err());
+
+    // Not enough stack items
+
+    let mut locking_script = vec![16 + 32];
+    locking_script.extend(0..32);
+    locking_script.push(237);
+
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, vec![]);
+
+    let mut txn = (*context.txn).clone();
+    let unlocking_script = vec![];
+
+    txn.inputs[0].unlocking_script = unlocking_script;
+
+    let context = Context {
+        txn: Rc::new(txn),
+        blockheight: 1,
+        networktime: 1000,
+    };
+
+    let script_state = evaluate_script(&context, 0, &utxo_set);
+
+    assert!(script_state.is_err());
+}
