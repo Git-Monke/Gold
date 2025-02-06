@@ -1,6 +1,9 @@
 // everything in this file will be related to transaction verification
-use crate::structs::*;
+use crate::{check_txn_sig, structs::*};
+use secp256k1::{schnorr::Signature, XOnlyPublicKey};
 use thiserror;
+
+use std::{ops::Index, rc::Rc};
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum ScriptFailure {
@@ -20,6 +23,8 @@ pub enum ScriptFailure {
     GeneralScriptFailure,
     #[error("Opcode requires more stack items than are in the stack")]
     NotEnoughStackItems,
+    #[error("An opcode required a specific structure to a stack item.")]
+    StackItemImproperLength,
 }
 
 #[derive(Debug)]
@@ -29,13 +34,20 @@ pub struct ScriptState {
     pub script: Vec<u8>,
 }
 
+// the context needed to perform sig checking and time checking
+pub struct Context {
+    pub txn: Rc<Txn>,
+    pub blockheight: usize,
+    pub networktime: usize,
+}
+
 // evaluation and validation have been seperated so they can be tested
 pub fn validate_script(
-    txn: Txn,
+    context: Context,
     input_index: usize,
     utxo_set: &UtxoSet,
 ) -> Result<(), ScriptFailure> {
-    let script_state = evaluate_script(txn, input_index, utxo_set)?;
+    let script_state = evaluate_script(&context, input_index, utxo_set)?;
 
     if script_state.stack.len() == 0 {
         return Err(ScriptFailure::GeneralScriptFailure);
@@ -48,12 +60,13 @@ pub fn validate_script(
 }
 
 pub fn evaluate_script(
-    txn: Txn,
+    context: &Context,
     input_index: usize,
     utxo_set: &UtxoSet,
 ) -> Result<ScriptState, ScriptFailure> {
     // Get the input
-    let input = &txn
+    let input = &context
+        .txn
         .inputs
         .get(input_index)
         .ok_or(ScriptFailure::InputIndexOutOfRange)?;
@@ -76,7 +89,6 @@ pub fn evaluate_script(
     full_script.extend_from_slice(unlocking_script);
     full_script.extend_from_slice(locking_script);
 
-    println!("{:?}", full_script);
     let mut script_state = ScriptState {
         stack: vec![],
         index: 0,
@@ -85,7 +97,7 @@ pub fn evaluate_script(
 
     // Perform opcodes until the end of the script is reached.
     while script_state.index < script_state.script.len() {
-        match perform_next_opcode(&mut script_state) {
+        match perform_next_opcode(&mut script_state, context) {
             Err(e) => return Err(e),
             _ => continue,
         }
@@ -94,7 +106,10 @@ pub fn evaluate_script(
     Ok(script_state)
 }
 
-fn perform_next_opcode(script_state: &mut ScriptState) -> Result<(), ScriptFailure> {
+fn perform_next_opcode(
+    script_state: &mut ScriptState,
+    context: &Context,
+) -> Result<(), ScriptFailure> {
     let opcode = script_state.script[script_state.index];
     println!("{:?}", opcode);
 
@@ -107,6 +122,7 @@ fn perform_next_opcode(script_state: &mut ScriptState) -> Result<(), ScriptFailu
         218 => opcode_dup(script_state),
         219 => opcode_drop(script_state),
         220 => opcode_verify(script_state),
+        237 => opcode_checksig(script_state, context),
         248 => opcode_check_equal(script_state),
         _ => Err(ScriptFailure::UnknownOpcode(opcode)),
     }
@@ -267,6 +283,42 @@ fn opcode_verify(script_state: &mut ScriptState) -> Result<(), ScriptFailure> {
     }
 
     script_state.index += 1;
+    Ok(())
+}
+
+fn opcode_checksig(script_state: &mut ScriptState, context: &Context) -> Result<(), ScriptFailure> {
+    let stack = &mut script_state.stack;
+    println!("{:?}", stack.len());
+    if stack.len() < 2 {
+        return Err(ScriptFailure::NotEnoughStackItems);
+    }
+
+    let pk = stack.pop().unwrap();
+    let sig = stack.pop().unwrap();
+
+    if pk.len() != 32 {
+        return Err(ScriptFailure::StackItemImproperLength);
+    }
+
+    if sig.len() != 64 {
+        return Err(ScriptFailure::StackItemImproperLength);
+    }
+
+    let pk_bytes: [u8; 32] = pk.as_slice().try_into().unwrap();
+    let sig_bytes: [u8; 64] = sig.as_slice().try_into().unwrap();
+
+    // Could fail if the provided public key is not a point on secp256k1
+    let pk = XOnlyPublicKey::from_byte_array(&pk_bytes)
+        .map_err(|_| ScriptFailure::GeneralScriptFailure)?;
+    let sig = Signature::from_byte_array(sig_bytes);
+
+    script_state.index += 1;
+
+    match check_txn_sig(&context.txn, &sig, &pk) {
+        true => stack.push(vec![1]),
+        false => stack.push(vec![0]),
+    }
+
     Ok(())
 }
 

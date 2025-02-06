@@ -2,6 +2,11 @@ use gold::structs::*;
 use gold::txn::*;
 
 use gold::*;
+use secp256k1::rand::rngs::OsRng;
+use secp256k1::Keypair;
+
+use std::ops::Deref;
+use std::rc::Rc;
 
 // testing data encoding and decoding
 
@@ -192,7 +197,7 @@ fn test_check_header_hash() {
 fn construct_simple_txn_context(
     locking_script: Vec<u8>,
     unlocking_script: Vec<u8>,
-) -> (UtxoSet, Txn) {
+) -> (UtxoSet, Context) {
     let mut utxo_set: UtxoSet = std::collections::HashMap::new();
 
     let old_output = TxnOutput {
@@ -220,20 +225,26 @@ fn construct_simple_txn_context(
         }],
     );
 
+    let txn = Rc::new(Txn {
+        inputs: vec![input],
+        outputs: vec![output],
+    });
+
     (
         utxo_set,
-        Txn {
-            inputs: vec![input],
-            outputs: vec![output],
+        Context {
+            txn: Rc::clone(&txn),
+            blockheight: 1,
+            networktime: 1000,
         },
     )
 }
 
 #[test]
 fn test_unknown_opcode() {
-    let (utxo_set, txn) = construct_simple_txn_context(vec![252], vec![0]);
+    let (utxo_set, context) = construct_simple_txn_context(vec![252], vec![0]);
 
-    let result = validate_script(txn, 0, &utxo_set);
+    let result = validate_script(context, 0, &utxo_set);
 
     assert!(result.is_err());
     assert!(result == Err(ScriptFailure::UnknownOpcode(252)));
@@ -243,8 +254,8 @@ fn test_unknown_opcode() {
 fn test_eq_opcode_success() {
     let locking_script = vec![1, 248];
     let unlocking_script = vec![1];
-    let (utxo_set, txn) = construct_simple_txn_context(locking_script, unlocking_script);
-    let result = validate_script(txn, 0, &utxo_set);
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+    let result = validate_script(context, 0, &utxo_set);
 
     assert!(result.is_ok());
 }
@@ -253,8 +264,8 @@ fn test_eq_opcode_success() {
 fn test_eq_opcode_fail() {
     let locking_script = vec![2, 248];
     let unlocking_script = vec![1];
-    let (utxo_set, txn) = construct_simple_txn_context(locking_script, unlocking_script);
-    let result = validate_script(txn, 0, &utxo_set);
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+    let result = validate_script(context, 0, &utxo_set);
 
     assert!(result.is_err());
     assert!(result == Err(ScriptFailure::GeneralScriptFailure));
@@ -264,8 +275,8 @@ fn test_eq_opcode_fail() {
 fn test_op_push_next_byte() {
     let locking_script = vec![0];
     let unlocking_script = vec![17, 255];
-    let (utxo_set, txn) = construct_simple_txn_context(locking_script, unlocking_script);
-    let script_state = evaluate_script(txn, 0, &utxo_set);
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+    let script_state = evaluate_script(&context, 0, &utxo_set);
 
     assert!(script_state.is_ok());
     assert!(script_state.unwrap().stack[0] == [255]);
@@ -275,8 +286,8 @@ fn test_op_push_next_byte() {
 fn test_op_push_next_byte_multiple_bytes() {
     let locking_script = vec![0];
     let unlocking_script = vec![18, 255];
-    let (utxo_set, txn) = construct_simple_txn_context(locking_script, unlocking_script);
-    let script_state = evaluate_script(txn, 0, &utxo_set);
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+    let script_state = evaluate_script(&context, 0, &utxo_set);
 
     assert!(script_state.is_ok());
 
@@ -286,8 +297,8 @@ fn test_op_push_next_byte_multiple_bytes() {
 
     let locking_script = vec![255; 64];
     let unlocking_script = vec![80];
-    let (utxo_set, txn) = construct_simple_txn_context(locking_script, unlocking_script);
-    let script_state = evaluate_script(txn, 0, &utxo_set);
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+    let script_state = evaluate_script(&context, 0, &utxo_set);
 
     assert!(script_state.is_ok());
     assert!(script_state.unwrap().stack[0] == [255; 64]);
@@ -298,8 +309,8 @@ fn test_op_push_next_byte_bytes() {
     let locking_script = vec![0, 0, 0, 0];
     let unlocking_script = vec![81, 4];
 
-    let (utxo_set, txn) = construct_simple_txn_context(locking_script, unlocking_script);
-    let script_state = evaluate_script(txn, 0, &utxo_set);
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+    let script_state = evaluate_script(&context, 0, &utxo_set);
 
     assert!(script_state.is_ok());
 
@@ -313,8 +324,8 @@ fn test_op_push_next_2_bytes_bytes() {
     let locking_script = vec![0; 65535];
     let unlocking_script = vec![82, 255, 255];
 
-    let (utxo_set, txn) = construct_simple_txn_context(locking_script, unlocking_script);
-    let script_state = evaluate_script(txn, 0, &utxo_set);
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+    let script_state = evaluate_script(&context, 0, &utxo_set);
 
     assert!(script_state.is_ok());
     assert!(script_state.unwrap().stack[0] == [0; 65535]);
@@ -325,8 +336,8 @@ fn test_op_push_next_2_bytes_bytes_fail() {
     let locking_script = vec![0; 65534];
     let unlocking_script = vec![82, 255, 255];
 
-    let (utxo_set, txn) = construct_simple_txn_context(locking_script, unlocking_script);
-    let script_state = evaluate_script(txn, 0, &utxo_set);
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+    let script_state = evaluate_script(&context, 0, &utxo_set);
 
     assert!(script_state.is_err());
 }
@@ -336,8 +347,8 @@ fn test_op_push_next_2_bytes_bytes_missing_args() {
     let locking_script = vec![];
     let unlocking_script = vec![82, 255];
 
-    let (utxo_set, txn) = construct_simple_txn_context(locking_script, unlocking_script);
-    let script_state = evaluate_script(txn, 0, &utxo_set);
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+    let script_state = evaluate_script(&context, 0, &utxo_set);
 
     assert!(script_state.is_err());
 }
@@ -347,8 +358,8 @@ fn test_op_push_next_byte_bytes_fail() {
     let locking_script = vec![0];
     let unlocking_script = vec![81, 2];
 
-    let (utxo_set, txn) = construct_simple_txn_context(locking_script, unlocking_script);
-    let script_state = evaluate_script(txn, 0, &utxo_set);
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+    let script_state = evaluate_script(&context, 0, &utxo_set);
 
     assert!(script_state.is_err());
 }
@@ -357,8 +368,8 @@ fn test_op_push_next_byte_bytes_fail() {
 fn test_op_push_next_byte_fail() {
     let locking_script = vec![];
     let unlocking_script = vec![17];
-    let (utxo_set, txn) = construct_simple_txn_context(locking_script, unlocking_script);
-    let script_state = evaluate_script(txn, 0, &utxo_set);
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+    let script_state = evaluate_script(&context, 0, &utxo_set);
 
     assert!(script_state.is_err());
 }
@@ -367,8 +378,8 @@ fn test_op_push_next_byte_fail() {
 fn test_op_dup() {
     let locking_script = vec![218, 248];
     let unlocking_script = vec![18, 2, 2];
-    let (utxo_set, txn) = construct_simple_txn_context(locking_script, unlocking_script);
-    let script_state = validate_script(txn, 0, &utxo_set);
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+    let script_state = validate_script(context, 0, &utxo_set);
 
     assert!(script_state.is_ok());
 }
@@ -377,8 +388,8 @@ fn test_op_dup() {
 fn test_op_drop() {
     let locking_script = vec![219];
     let unlocking_script = vec![18, 2, 2];
-    let (utxo_set, txn) = construct_simple_txn_context(locking_script, unlocking_script);
-    let script_state = evaluate_script(txn, 0, &utxo_set);
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+    let script_state = evaluate_script(&context, 0, &utxo_set);
 
     assert!(script_state.is_ok());
     assert!(script_state.unwrap().stack.len() == 0);
@@ -390,8 +401,8 @@ fn test_op_verify() {
     // If working properly, the stack should be empty
     let locking_script = vec![1, 248, 220];
     let unlocking_script = vec![1];
-    let (utxo_set, txn) = construct_simple_txn_context(locking_script, unlocking_script);
-    let script_state = evaluate_script(txn, 0, &utxo_set);
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+    let script_state = evaluate_script(&context, 0, &utxo_set);
 
     assert!(script_state.is_ok());
     assert!(script_state.unwrap().stack.len() == 0);
@@ -401,8 +412,51 @@ fn test_op_verify() {
 fn test_op_verify_fail_branch() {
     let locking_script = vec![2, 248, 220];
     let unlocking_script = vec![1];
-    let (utxo_set, txn) = construct_simple_txn_context(locking_script, unlocking_script);
-    let script_state = evaluate_script(txn, 0, &utxo_set);
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+    let script_state = evaluate_script(&context, 0, &utxo_set);
 
     assert!(script_state.is_err());
+}
+
+#[test]
+fn test_checksig() {
+    // set up crypto functions
+    let secp = secp256k1::Secp256k1::new();
+    let keypair = Keypair::new(&secp, &mut OsRng);
+    let pk = keypair.x_only_public_key();
+
+    // create a basic locking script
+    let mut locking_script = vec![16 + 32];
+    locking_script.extend(pk.0.serialize().iter());
+    locking_script.push(237);
+
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, vec![]);
+
+    // clone the transaction so we can complete the intput scripts and create new context later
+    // this is pretty janky, but I don't want to rewrite all that txn building code
+    let mut txn = (*context.txn).clone();
+
+    // Take the txn, create the sig for it, set the unlocking script to use this sig
+    let sig = sign_transaction(&context.txn, &keypair);
+    let mut unlocking_script = vec![80];
+    unlocking_script.extend(sig.as_byte_array().iter());
+
+    txn.inputs[0].unlocking_script = unlocking_script;
+
+    let context = Context {
+        txn: Rc::new(txn),
+        blockheight: 1,
+        networktime: 1000,
+    };
+
+    // Check that its valid
+    let script_state = evaluate_script(&context, 0, &utxo_set);
+    println!("{:?}", script_state);
+
+    assert!(script_state.is_ok());
+
+    let script_state = script_state.unwrap();
+
+    assert!(script_state.stack.len() == 1);
+    assert!(script_state.stack[0][0] == 1);
 }

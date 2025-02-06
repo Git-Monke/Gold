@@ -1,8 +1,10 @@
-use sha2::{self, Digest};
-
 pub mod structs;
 pub mod txn;
 
+use secp256k1::rand::rngs::OsRng;
+use secp256k1::{schnorr::Signature, Keypair};
+use secp256k1::{PublicKey, XOnlyPublicKey};
+use sha2::{Digest, Sha256};
 use structs::*;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -178,6 +180,23 @@ pub fn encode_txn_without_input_scripts(txn: &Txn) -> Vec<u8> {
     }
 
     data
+}
+
+pub fn sign_transaction(txn: &Txn, keypair: &Keypair) -> Signature {
+    let secp = secp256k1::Secp256k1::new();
+    let data = encode_txn_without_input_scripts(txn);
+    let hash = Sha256::digest(data);
+    secp.sign_schnorr_with_rng(&hash, keypair, &mut OsRng)
+}
+
+pub fn check_txn_sig(txn: &Txn, sig: &Signature, pubkey: &XOnlyPublicKey) -> bool {
+    let msg = Sha256::digest(encode_txn_without_input_scripts(txn));
+    check_schnorr_sig(sig, &msg, pubkey)
+}
+
+pub fn check_schnorr_sig(sig: &Signature, msg: &[u8], pubkey: &XOnlyPublicKey) -> bool {
+    let secp = secp256k1::Secp256k1::new();
+    secp.verify_schnorr(sig, msg, pubkey).is_ok()
 }
 
 pub fn to_compact_int_bytes(n: usize) -> Vec<u8> {
