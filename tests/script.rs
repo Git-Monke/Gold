@@ -779,3 +779,77 @@ fn check_multisig_reused_pk() {
 
     assert!(script_state.is_err());
 }
+
+#[test]
+fn check_hashripemd160() {
+    // The locking script is asking for some data where RIPEMD160(SHA256(data)) == [155,196,134,...];
+    let locking_script = vec![
+        239,
+        16 + 20,
+        155,
+        196,
+        134,
+        11,
+        185,
+        54,
+        171,
+        242,
+        98,
+        215,
+        165,
+        31,
+        116,
+        180,
+        48,
+        72,
+        51,
+        254,
+        227,
+        178,
+        248,
+    ];
+
+    // The data is [1, 2, 3]. This script should pass.
+    let unlocking_script = vec![16 + 3, 1, 2, 3];
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+    let script_state = validate_script(context, 0, &utxo_set);
+
+    assert!(script_state.is_ok());
+}
+
+#[test]
+fn check_hashripemd160_fail() {
+    // The locking script is asking for some data where RIPEMD160(SHA256(data)) == [155,196,134,...];
+    let locking_script = vec![
+        239,
+        16 + 20,
+        155,
+        196,
+        134,
+        11,
+        185,
+        54,
+        171,
+        242,
+        98,
+        215,
+        165,
+        31,
+        116,
+        180,
+        48,
+        72,
+        51,
+        254,
+        227,
+        178,
+        248,
+    ];
+
+    // The data is [1, 2, 3]. This script should fail.
+    let unlocking_script = vec![16 + 3, 1, 2, 4];
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+    let script_state = validate_script(context, 0, &utxo_set);
+
+    assert!(script_state.is_err());
+}

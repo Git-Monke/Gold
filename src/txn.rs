@@ -1,8 +1,10 @@
 // everything in this file will be related to transaction verification
 use crate::{check_txn_sig, structs::*};
+use ripemd::{Digest, Ripemd160};
 use secp256k1::{schnorr::Signature, XOnlyPublicKey};
 use thiserror;
 
+use sha2::{Digest as ShaDigest, Sha256};
 use std::{ops::Index, rc::Rc};
 
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -124,6 +126,7 @@ fn perform_next_opcode(
         220 => opcode_verify(script_state),
         237 => opcode_checksig(script_state, context),
         238 => opcode_checkmultisig(script_state, context),
+        239 => opcode_hashripemd160(script_state),
         248 => opcode_check_equal(script_state),
         _ => Err(ScriptFailure::UnknownOpcode(opcode)),
     }
@@ -428,6 +431,23 @@ fn opcode_checkmultisig(
         stack.push(vec![0]);
     }
 
+    script_state.index += 1;
+
+    Ok(())
+}
+
+fn opcode_hashripemd160(script_state: &mut ScriptState) -> Result<(), ScriptFailure> {
+    let stack = &mut script_state.stack;
+
+    if stack.len() < 1 {
+        return Err(ScriptFailure::NotEnoughStackItems);
+    }
+
+    let top_item = stack.pop().unwrap();
+    let sha_hash = Sha256::digest(top_item);
+    let ripemd_hash = Ripemd160::digest(sha_hash);
+
+    stack.push(ripemd_hash.to_vec());
     script_state.index += 1;
 
     Ok(())
