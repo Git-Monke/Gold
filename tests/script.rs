@@ -681,6 +681,7 @@ fn check_multisig() {
     };
 
     let script_state = evaluate_script(&context, 0, &utxo_set);
+    println!("{:?}", script_state);
 
     assert!(script_state.is_ok());
 

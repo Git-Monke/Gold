@@ -123,6 +123,7 @@ fn perform_next_opcode(
         219 => opcode_drop(script_state),
         220 => opcode_verify(script_state),
         237 => opcode_checksig(script_state, context),
+        238 => opcode_checkmultisig(script_state, context),
         248 => opcode_check_equal(script_state),
         _ => Err(ScriptFailure::UnknownOpcode(opcode)),
     }
@@ -288,7 +289,7 @@ fn opcode_verify(script_state: &mut ScriptState) -> Result<(), ScriptFailure> {
 
 fn opcode_checksig(script_state: &mut ScriptState, context: &Context) -> Result<(), ScriptFailure> {
     let stack = &mut script_state.stack;
-    println!("{:?}", stack.len());
+
     if stack.len() < 2 {
         return Err(ScriptFailure::NotEnoughStackItems);
     }
@@ -326,7 +327,113 @@ fn opcode_checkmultisig(
     script_state: &mut ScriptState,
     context: &Context,
 ) -> Result<(), ScriptFailure> {
-    Err(ScriptFailure::GeneralScriptFailure)
+    let stack = &mut script_state.stack;
+
+    // minimum requirement is 1 pk, 1 sig, and 2 bytes specifying that.
+    if stack.len() < 4 {
+        return Err(ScriptFailure::NotEnoughStackItems);
+    }
+
+    // Get the num pks to push
+
+    let num_pks = stack.pop().unwrap();
+
+    if num_pks.len() != 1 {
+        return Err(ScriptFailure::StackItemImproperLength);
+    }
+
+    let num_pks = num_pks[0];
+
+    // Pop that many pks off the stack and validate them
+
+    let mut pks: Vec<XOnlyPublicKey> = vec![];
+
+    for _ in 0..num_pks {
+        let new_key = stack.pop().unwrap();
+
+        if new_key.len() != 32 {
+            return Err(ScriptFailure::StackItemImproperLength);
+        }
+
+        let new_key = new_key.as_slice().try_into().unwrap();
+        let new_key = XOnlyPublicKey::from_byte_array(new_key)
+            .map_err(|_| ScriptFailure::GeneralScriptFailure)?;
+
+        // The same public key can't be used twice
+
+        if pks.contains(&new_key) {
+            return Err(ScriptFailure::GeneralScriptFailure);
+        }
+
+        pks.push(new_key);
+    }
+
+    // Get the num sigs to push
+
+    let num_sigs = stack.pop().unwrap();
+
+    if num_sigs.len() != 1 {
+        return Err(ScriptFailure::StackItemImproperLength);
+    }
+
+    let num_sigs = num_sigs[0];
+
+    if num_sigs > num_pks {
+        return Err(ScriptFailure::GeneralScriptFailure);
+    }
+
+    // Pop that many sigs off the stack and validate them
+
+    let mut sigs: Vec<Signature> = vec![];
+
+    for _ in 0..num_sigs {
+        let new_sig = stack.pop().unwrap();
+
+        if new_sig.len() != 64 {
+            return Err(ScriptFailure::StackItemImproperLength);
+        }
+
+        let new_sig = new_sig.as_slice().try_into().unwrap();
+        let new_sig = Signature::from_byte_array(new_sig);
+
+        sigs.push(new_sig);
+    }
+
+    println!("{:?}", pks);
+    println!("{:?}", sigs);
+
+    let mut valid = true;
+    let mut used_pubkeys = vec![false; num_pks as usize];
+
+    // For each sig, try and find a matching public key
+    // If no public key is found for a single sig, the whole transaction fails
+    'sig_loop: for sig in &sigs {
+        for (i, pk) in pks.iter().enumerate() {
+            if used_pubkeys[i] == true {
+                continue;
+            }
+
+            let pk_is_valid = check_txn_sig(&context.txn, sig, pk);
+
+            if pk_is_valid {
+                used_pubkeys[i] = true;
+                continue 'sig_loop;
+            }
+        }
+
+        valid = false;
+        break;
+    }
+
+    if valid {
+        stack.push(vec![1]);
+    } else {
+        stack.push(vec![0]);
+    }
+
+    script_state.index += 1;
+
+    Ok(())
 }
 
 fn current_script_byte(script_state: &ScriptState) -> u8 {
