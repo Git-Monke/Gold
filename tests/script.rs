@@ -2,6 +2,7 @@ use gold::structs::*;
 use gold::txn::*;
 
 use gold::*;
+use secp256k1::constants::GENERATOR_Y;
 use secp256k1::rand::rngs::OsRng;
 use secp256k1::Keypair;
 
@@ -238,6 +239,42 @@ fn construct_simple_txn_context(
             networktime: 1000,
         },
     )
+}
+
+fn construct_simple_txn_with_utxo(locking_script: Vec<u8>) -> (UtxoSet, Txn) {
+    let mut utxo_set: UtxoSet = std::collections::HashMap::new();
+
+    let old_output = TxnOutput {
+        locking_script,
+        amount: 0,
+    };
+
+    let input = TxnInput {
+        output_txid: vec![0; 32].try_into().unwrap(),
+        output_index: 0,
+        unlocking_script: vec![],
+    };
+
+    let output = TxnOutput {
+        locking_script: vec![],
+        amount: 10,
+    };
+
+    utxo_set.insert(
+        vec![0; 32].try_into().unwrap(),
+        vec![Utxo {
+            txn_output: old_output,
+            block_height: 0,
+            block_time: 0,
+        }],
+    );
+
+    let txn = Txn {
+        inputs: vec![input],
+        outputs: vec![output],
+    };
+
+    (utxo_set, txn)
 }
 
 #[test]
@@ -592,4 +629,63 @@ fn test_checksig_failures() {
     let script_state = evaluate_script(&context, 0, &utxo_set);
 
     assert!(script_state.is_err());
+}
+
+fn gen_random_keypair() -> Keypair {
+    let secp = secp256k1::Secp256k1::new();
+    Keypair::new(&secp, &mut OsRng)
+}
+
+#[test]
+fn check_multisig() {
+    let kp1 = gen_random_keypair();
+    let kp2 = gen_random_keypair();
+    let kp3 = gen_random_keypair();
+
+    let pk1 = kp1.x_only_public_key().0;
+    let pk2 = kp2.x_only_public_key().0;
+    let pk3 = kp3.x_only_public_key().0;
+
+    let mut locking_script = vec![2, 48];
+
+    // This is a basic implementation of a multisig locking script
+    // First num (2) is the number of public keys the user has to provide to spend the coin
+    // Then ALL of the valid pk's are pushed to the stack
+    // Finally, you push the number of pks, topped off with a checkmultisig opcode
+    // To solve this, the user must provide a script which pushes (2) unique and valid sigs to the top of the stack
+    // Ex. [80, <Sig 1>, 80, <Sig 2>]
+    locking_script.extend(pk1.serialize().iter());
+    locking_script.push(48);
+    locking_script.extend(pk2.serialize().iter());
+    locking_script.push(48);
+    locking_script.extend(pk3.serialize().iter());
+    locking_script.push(3);
+    locking_script.push(238);
+
+    let (utxo_set, mut txn) = construct_simple_txn_with_utxo(locking_script);
+
+    let sig1 = sign_transaction(&txn, &kp1);
+    let sig2 = sign_transaction(&txn, &kp2);
+
+    let mut unlocking_script = vec![80];
+    unlocking_script.extend(sig1.as_byte_array().iter());
+    unlocking_script.push(80);
+    unlocking_script.extend(sig2.as_byte_array().iter());
+
+    txn.inputs[0].unlocking_script = unlocking_script;
+
+    let context = Context {
+        txn: Rc::new(txn),
+        blockheight: 1,
+        networktime: 1000,
+    };
+
+    let script_state = evaluate_script(&context, 0, &utxo_set);
+
+    assert!(script_state.is_ok());
+
+    let script_state = script_state.unwrap();
+
+    assert!(script_state.stack.len() == 1);
+    assert!(script_state.stack[0][0] == 1);
 }

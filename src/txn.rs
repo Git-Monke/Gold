@@ -322,6 +322,13 @@ fn opcode_checksig(script_state: &mut ScriptState, context: &Context) -> Result<
     Ok(())
 }
 
+fn opcode_checkmultisig(
+    script_state: &mut ScriptState,
+    context: &Context,
+) -> Result<(), ScriptFailure> {
+    Err(ScriptFailure::GeneralScriptFailure)
+}
+
 fn current_script_byte(script_state: &ScriptState) -> u8 {
     script_state.script[script_state.index]
 }
