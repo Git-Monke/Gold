@@ -399,9 +399,6 @@ fn opcode_checkmultisig(
         sigs.push(new_sig);
     }
 
-    println!("{:?}", pks);
-    println!("{:?}", sigs);
-
     let mut valid = true;
     let mut used_pubkeys = vec![false; num_pks as usize];
 

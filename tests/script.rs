@@ -681,7 +681,6 @@ fn check_multisig() {
     };
 
     let script_state = evaluate_script(&context, 0, &utxo_set);
-    println!("{:?}", script_state);
 
     assert!(script_state.is_ok());
 
@@ -689,4 +688,94 @@ fn check_multisig() {
 
     assert!(script_state.stack.len() == 1);
     assert!(script_state.stack[0][0] == 1);
+}
+
+#[test]
+fn check_multisig_invalid_sig() {
+    let kp1 = gen_random_keypair();
+    let kp2 = gen_random_keypair();
+    let kp3 = gen_random_keypair();
+
+    let pk1 = kp1.x_only_public_key().0;
+    let pk2 = kp2.x_only_public_key().0;
+    let pk3 = kp3.x_only_public_key().0;
+
+    let mut locking_script = vec![2, 48];
+
+    locking_script.extend(pk1.serialize().iter());
+    locking_script.push(48);
+    locking_script.extend(pk2.serialize().iter());
+    locking_script.push(48);
+    locking_script.extend(pk3.serialize().iter());
+    locking_script.push(3);
+    locking_script.push(238);
+
+    let (utxo_set, mut txn) = construct_simple_txn_with_utxo(locking_script);
+
+    let sig1 = [0; 64];
+    let sig2 = sign_transaction(&txn, &kp2);
+
+    let mut unlocking_script = vec![80];
+    unlocking_script.extend(sig1.iter());
+    unlocking_script.push(80);
+    unlocking_script.extend(sig2.as_byte_array().iter());
+
+    txn.inputs[0].unlocking_script = unlocking_script;
+
+    let context = Context {
+        txn: Rc::new(txn),
+        blockheight: 1,
+        networktime: 1000,
+    };
+
+    let script_state = evaluate_script(&context, 0, &utxo_set);
+
+    assert!(script_state.is_ok());
+
+    let script_state = script_state.unwrap();
+
+    assert!(script_state.stack.len() == 1);
+    assert!(script_state.stack[0][0] == 0);
+}
+
+#[test]
+fn check_multisig_reused_pk() {
+    let kp1 = gen_random_keypair();
+    let kp2 = gen_random_keypair();
+    let kp3 = gen_random_keypair();
+
+    let pk1 = kp1.x_only_public_key().0;
+    let pk3 = kp3.x_only_public_key().0;
+
+    let mut locking_script = vec![2, 48];
+
+    locking_script.extend(pk1.serialize().iter());
+    locking_script.push(48);
+    locking_script.extend(pk1.serialize().iter());
+    locking_script.push(48);
+    locking_script.extend(pk3.serialize().iter());
+    locking_script.push(3);
+    locking_script.push(238);
+
+    let (utxo_set, mut txn) = construct_simple_txn_with_utxo(locking_script);
+
+    let sig1 = [0; 64];
+    let sig2 = sign_transaction(&txn, &kp2);
+
+    let mut unlocking_script = vec![80];
+    unlocking_script.extend(sig1.iter());
+    unlocking_script.push(80);
+    unlocking_script.extend(sig2.as_byte_array().iter());
+
+    txn.inputs[0].unlocking_script = unlocking_script;
+
+    let context = Context {
+        txn: Rc::new(txn),
+        blockheight: 1,
+        networktime: 1000,
+    };
+
+    let script_state = evaluate_script(&context, 0, &utxo_set);
+
+    assert!(script_state.is_err());
 }
