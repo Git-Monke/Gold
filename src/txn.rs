@@ -27,6 +27,8 @@ pub enum ScriptFailure {
     NotEnoughStackItems,
     #[error("An opcode required a specific structure to a stack item.")]
     StackItemImproperLength,
+    #[error("Invalid argument")]
+    InvalidInput,
 }
 
 #[derive(Debug)]
@@ -114,7 +116,6 @@ fn perform_next_opcode(
     context: &Context,
 ) -> Result<(), ScriptFailure> {
     let opcode = script_state.script[script_state.index];
-    println!("{:?}", opcode);
 
     match opcode {
         0 => opcode_do_nothing(script_state),
@@ -131,6 +132,15 @@ fn perform_next_opcode(
         248 => opcode_check_equal(script_state),
         249 => opcode_checkblockheight(script_state, context),
         250 => opcode_checkblockheightrelative(script_state, context),
+        253 => opcode_if(script_state),
+        254 => {
+            script_state.index += 1;
+            Ok(())
+        }
+        255 => {
+            script_state.index += 1;
+            Ok(())
+        }
         _ => Err(ScriptFailure::UnknownOpcode(opcode)),
     }
 }
@@ -511,6 +521,68 @@ fn opcode_checkblockheightrelative(
         stack.push(vec![0]);
     } else {
         stack.push(vec![1]);
+    }
+
+    script_state.index += 1;
+
+    Ok(())
+}
+
+fn opcode_if(script_state: &mut ScriptState) -> Result<(), ScriptFailure> {
+    let stack = &mut script_state.stack;
+
+    if stack.len() < 1 {
+        return Err(ScriptFailure::NotEnoughStackItems);
+    }
+
+    let condition = stack.pop().unwrap();
+
+    if condition.len() != 1 {
+        return Err(ScriptFailure::StackItemImproperLength);
+    }
+
+    let condition = condition[0];
+
+    if !(condition == 0 || condition == 1) {
+        return Err(ScriptFailure::InvalidInput);
+    }
+
+    let index = script_state.index;
+    let len = script_state.script.len();
+
+    let mut has_else = false;
+    let mut else_position = 0;
+    let mut end_position = 0;
+
+    let script = &mut script_state.script;
+
+    for i in index..len {
+        if i == len - 1 && script[i] != 255 {
+            end_position = len;
+            break;
+        }
+
+        if script[i] == 254 {
+            has_else = true;
+            else_position = i;
+        }
+
+        if script[i] == 255 {
+            end_position = i;
+            break;
+        }
+    }
+
+    if condition == 1 && has_else {
+        script[(else_position + 1)..end_position].fill(0);
+    }
+
+    if condition == 0 {
+        if has_else {
+            script[script_state.index + 1..else_position].fill(0);
+        } else {
+            script[script_state.index + 1..end_position].fill(0);
+        }
     }
 
     script_state.index += 1;

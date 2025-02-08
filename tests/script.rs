@@ -903,3 +903,67 @@ fn check_locktimerelative() {
     assert!(script_state.is_ok());
     assert!(script_state.unwrap().stack[0] == vec![0]);
 }
+
+#[test]
+fn check_if() {
+    let locking_script = vec![1, 253, 1, 1, 1, 254, 2, 2, 2, 255];
+    let unlocking_script = vec![];
+
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+
+    let script_state = evaluate_script(&context, 0, &utxo_set).unwrap();
+
+    assert_eq!(
+        script_state.script,
+        vec![1, 253, 1, 1, 1, 254, 0, 0, 0, 255]
+    );
+
+    // fail case
+
+    let locking_script = vec![17, 0, 253, 1, 1, 1, 254, 2, 2, 2, 255, 1, 2];
+    let unlocking_script = vec![];
+
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+
+    let script_state = evaluate_script(&context, 0, &utxo_set).unwrap();
+
+    assert_eq!(
+        script_state.script,
+        vec![17, 0, 253, 0, 0, 0, 254, 2, 2, 2, 255, 1, 2]
+    );
+
+    // edge cases
+
+    // no else
+    let locking_script = vec![1, 253, 1, 1, 1, 2, 2, 2, 255, 1, 2, 3];
+    let unlocking_script = vec![];
+
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+
+    let script_state = evaluate_script(&context, 0, &utxo_set).unwrap();
+
+    assert_eq!(
+        script_state.script,
+        vec![1, 253, 1, 1, 1, 2, 2, 2, 255, 1, 2, 3]
+    );
+
+    // no endif 0 case
+    let locking_script = vec![17, 0, 253, 1, 1, 1, 2, 2, 2];
+    let unlocking_script = vec![];
+
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+
+    let script_state = evaluate_script(&context, 0, &utxo_set).unwrap();
+
+    assert_eq!(script_state.script, vec![17, 0, 253, 0, 0, 0, 0, 0, 0]);
+
+    // succesful if, else, no endif
+    let locking_script = vec![1, 253, 1, 1, 1, 254, 2, 2, 2];
+    let unlocking_script = vec![];
+
+    let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
+
+    let script_state = evaluate_script(&context, 0, &utxo_set).unwrap();
+
+    assert_eq!(script_state.script, vec![1, 253, 1, 1, 1, 254, 0, 0, 0]);
+}
