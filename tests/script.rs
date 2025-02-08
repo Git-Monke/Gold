@@ -2,11 +2,9 @@ use gold::structs::*;
 use gold::txn::*;
 
 use gold::*;
-use secp256k1::constants::GENERATOR_Y;
 use secp256k1::rand::rngs::OsRng;
 use secp256k1::Keypair;
 
-use std::ops::Deref;
 use std::rc::Rc;
 
 // testing data encoding and decoding
@@ -236,7 +234,7 @@ fn construct_simple_txn_context(
         Context {
             txn: Rc::clone(&txn),
             blockheight: 1,
-            networktime: 1000,
+            utxo_blockheight: 0,
         },
     )
 }
@@ -281,7 +279,7 @@ fn construct_simple_txn_with_utxo(locking_script: Vec<u8>) -> (UtxoSet, Txn) {
 fn test_unknown_opcode() {
     let (utxo_set, context) = construct_simple_txn_context(vec![252], vec![0]);
 
-    let result = validate_script(context, 0, &utxo_set);
+    let result = validate_script(&context, 0, &utxo_set);
 
     assert!(result.is_err());
     assert!(result == Err(ScriptFailure::UnknownOpcode(252)));
@@ -292,7 +290,7 @@ fn test_eq_opcode_success() {
     let locking_script = vec![1, 248];
     let unlocking_script = vec![1];
     let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
-    let result = validate_script(context, 0, &utxo_set);
+    let result = validate_script(&context, 0, &utxo_set);
 
     assert!(result.is_ok());
 }
@@ -302,7 +300,7 @@ fn test_eq_opcode_fail() {
     let locking_script = vec![2, 248];
     let unlocking_script = vec![1];
     let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
-    let result = validate_script(context, 0, &utxo_set);
+    let result = validate_script(&context, 0, &utxo_set);
 
     assert!(result.is_err());
     assert!(result == Err(ScriptFailure::GeneralScriptFailure));
@@ -416,7 +414,7 @@ fn test_op_dup() {
     let locking_script = vec![218, 248];
     let unlocking_script = vec![18, 2, 2];
     let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
-    let script_state = validate_script(context, 0, &utxo_set);
+    let script_state = validate_script(&context, 0, &utxo_set);
 
     assert!(script_state.is_ok());
 }
@@ -483,7 +481,7 @@ fn test_checksig() {
     let context = Context {
         txn: Rc::new(txn),
         blockheight: 1,
-        networktime: 1000,
+        utxo_blockheight: 0,
     };
 
     // Check that its valid
@@ -523,7 +521,7 @@ fn test_checksig_failures() {
     let context = Context {
         txn: Rc::new(txn),
         blockheight: 1,
-        networktime: 1000,
+        utxo_blockheight: 0,
     };
 
     let script_state = evaluate_script(&context, 0, &utxo_set);
@@ -552,7 +550,7 @@ fn test_checksig_failures() {
     let context = Context {
         txn: Rc::new(txn),
         blockheight: 1,
-        networktime: 1000,
+        utxo_blockheight: 0,
     };
 
     let script_state = evaluate_script(&context, 0, &utxo_set);
@@ -576,7 +574,7 @@ fn test_checksig_failures() {
     let context = Context {
         txn: Rc::new(txn),
         blockheight: 1,
-        networktime: 1000,
+        utxo_blockheight: 0,
     };
 
     let script_state = evaluate_script(&context, 0, &utxo_set);
@@ -600,7 +598,7 @@ fn test_checksig_failures() {
     let context = Context {
         txn: Rc::new(txn),
         blockheight: 1,
-        networktime: 1000,
+        utxo_blockheight: 0,
     };
 
     let script_state = evaluate_script(&context, 0, &utxo_set);
@@ -623,7 +621,7 @@ fn test_checksig_failures() {
     let context = Context {
         txn: Rc::new(txn),
         blockheight: 1,
-        networktime: 1000,
+        utxo_blockheight: 0,
     };
 
     let script_state = evaluate_script(&context, 0, &utxo_set);
@@ -677,7 +675,7 @@ fn check_multisig() {
     let context = Context {
         txn: Rc::new(txn),
         blockheight: 1,
-        networktime: 1000,
+        utxo_blockheight: 0,
     };
 
     let script_state = evaluate_script(&context, 0, &utxo_set);
@@ -725,7 +723,7 @@ fn check_multisig_invalid_sig() {
     let context = Context {
         txn: Rc::new(txn),
         blockheight: 1,
-        networktime: 1000,
+        utxo_blockheight: 0,
     };
 
     let script_state = evaluate_script(&context, 0, &utxo_set);
@@ -772,7 +770,7 @@ fn check_multisig_reused_pk() {
     let context = Context {
         txn: Rc::new(txn),
         blockheight: 1,
-        networktime: 1000,
+        utxo_blockheight: 0,
     };
 
     let script_state = evaluate_script(&context, 0, &utxo_set);
@@ -812,7 +810,7 @@ fn check_hashripemd160() {
     // The data is [1, 2, 3]. This script should pass.
     let unlocking_script = vec![16 + 3, 1, 2, 3];
     let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
-    let script_state = validate_script(context, 0, &utxo_set);
+    let script_state = validate_script(&context, 0, &utxo_set);
 
     assert!(script_state.is_ok());
 }
@@ -849,7 +847,59 @@ fn check_hashripemd160_fail() {
     // The data is [1, 2, 3]. This script should fail.
     let unlocking_script = vec![16 + 3, 1, 2, 4];
     let (utxo_set, context) = construct_simple_txn_context(locking_script, unlocking_script);
-    let script_state = validate_script(context, 0, &utxo_set);
+    let script_state = validate_script(&context, 0, &utxo_set);
 
     assert!(script_state.is_err());
+}
+
+#[test]
+fn check_locktime() {
+    // A coin with this script can be spent by anyone during or after block 10
+    let locking_script = vec![16 + 4, 10, 0, 0, 0, 249];
+    let unlocking_script = vec![];
+
+    let (utxo_set, mut context) = construct_simple_txn_context(locking_script, unlocking_script);
+
+    context.blockheight = 11;
+
+    let script_state = evaluate_script(&context, 0, &utxo_set);
+
+    // Block height = 11, Required block height = 10. Spendable!
+    assert!(script_state.is_ok());
+    assert!(script_state.unwrap().stack[0] == vec![1]);
+
+    // Block height = 9, Required block height = 10. Fail.
+    context.blockheight = 9;
+
+    let script_state = evaluate_script(&context, 0, &utxo_set);
+
+    assert!(script_state.is_ok());
+    assert!(script_state.unwrap().stack[0] == vec![0]);
+}
+
+#[test]
+fn check_locktimerelative() {
+    // This script can be spent by anyone as soon as the coin is 10 blocks old
+    let locking_script = vec![16 + 4, 10, 0, 0, 0, 250];
+    let unlocking_script = vec![];
+
+    let (utxo_set, mut context) = construct_simple_txn_context(locking_script, unlocking_script);
+
+    context.blockheight = 11;
+    context.utxo_blockheight = 1;
+
+    let script_state = evaluate_script(&context, 0, &utxo_set);
+
+    // Block height = 11, UTXO created on block 1. 11 - 1 = 10. Spendable!
+    assert!(script_state.is_ok());
+    assert!(script_state.unwrap().stack[0] == vec![1]);
+
+    // Block height = 9, UTXO created on block 1. 9 - 1 = 8. Fail!
+    context.blockheight = 9;
+    context.utxo_blockheight = 1;
+
+    let script_state = evaluate_script(&context, 0, &utxo_set);
+
+    assert!(script_state.is_ok());
+    assert!(script_state.unwrap().stack[0] == vec![0]);
 }

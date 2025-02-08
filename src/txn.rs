@@ -37,15 +37,16 @@ pub struct ScriptState {
 }
 
 // the context needed to perform sig checking and time checking
+// utxo_blockeight is the height at which the UTXO we are trying to spend was created
 pub struct Context {
     pub txn: Rc<Txn>,
     pub blockheight: usize,
-    pub networktime: usize,
+    pub utxo_blockheight: usize,
 }
 
 // evaluation and validation have been seperated so they can be tested
 pub fn validate_script(
-    context: Context,
+    context: &Context,
     input_index: usize,
     utxo_set: &UtxoSet,
 ) -> Result<(), ScriptFailure> {
@@ -128,6 +129,8 @@ fn perform_next_opcode(
         238 => opcode_checkmultisig(script_state, context),
         239 => opcode_hashripemd160(script_state),
         248 => opcode_check_equal(script_state),
+        249 => opcode_checkblockheight(script_state, context),
+        250 => opcode_checkblockheightrelative(script_state, context),
         _ => Err(ScriptFailure::UnknownOpcode(opcode)),
     }
 }
@@ -448,6 +451,68 @@ fn opcode_hashripemd160(script_state: &mut ScriptState) -> Result<(), ScriptFail
     let ripemd_hash = Ripemd160::digest(sha_hash);
 
     stack.push(ripemd_hash.to_vec());
+    script_state.index += 1;
+
+    Ok(())
+}
+
+fn opcode_checkblockheight(
+    script_state: &mut ScriptState,
+    context: &Context,
+) -> Result<(), ScriptFailure> {
+    let stack = &mut script_state.stack;
+
+    if stack.len() < 1 {
+        return Err(ScriptFailure::NotEnoughStackItems);
+    }
+
+    let blockheight = stack.pop().unwrap();
+
+    if blockheight.len() != 4 {
+        return Err(ScriptFailure::StackItemImproperLength);
+    }
+
+    let blockheight = u32::from_le_bytes(blockheight.try_into().unwrap()) as usize;
+
+    if context.blockheight < blockheight {
+        stack.push(vec![0]);
+    } else {
+        stack.push(vec![1]);
+    }
+
+    script_state.index += 1;
+
+    Ok(())
+}
+
+fn opcode_checkblockheightrelative(
+    script_state: &mut ScriptState,
+    context: &Context,
+) -> Result<(), ScriptFailure> {
+    let stack = &mut script_state.stack;
+
+    if stack.len() < 1 {
+        return Err(ScriptFailure::NotEnoughStackItems);
+    }
+
+    let required_diff = stack.pop().unwrap();
+
+    if required_diff.len() != 4 {
+        return Err(ScriptFailure::StackItemImproperLength);
+    }
+
+    // blockheight = the one specific in the script
+    // utxo_blockheight is when the output we are trying to spend was created
+    let required_diff = u32::from_le_bytes(required_diff.try_into().unwrap()) as isize;
+
+    // if the difference between the current blockheight and when the utxo was created is less than the number we specified
+    // Then push a 0. Otherwise, push a 1
+    if (context.blockheight as isize - context.utxo_blockheight as isize) < required_diff {
+        stack.push(vec![0]);
+    } else {
+        stack.push(vec![1]);
+    }
+
     script_state.index += 1;
 
     Ok(())
