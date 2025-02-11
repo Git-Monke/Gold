@@ -6,14 +6,16 @@ use secp256k1::{schnorr::Signature, Keypair};
 use secp256k1::{PublicKey, XOnlyPublicKey};
 use sha2::{Digest, Sha256};
 use structs::*;
+use thiserror::Error;
+use txn::{validate_script, Context};
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-
-macro_rules! string_error {
-    ( $string:literal ) => {
-        Err($string.try_into().unwrap())
-    };
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum Error {
+    #[error("The block failed to validate: {0}")]
+    BlockValidationError(String),
 }
+
+type Result<T> = std::result::Result<T, Error>;
 
 // takes a valid new_block
 fn push_block(new_block: &Block, utxo_set: &mut UtxoSet) {
@@ -37,20 +39,30 @@ fn validate_block(
     prev_block: &Block,
     utxo_set: &mut UtxoSet,
     median_time: usize,
+    median_size: usize,
+    block_height: usize,
     target: [u8; 32],
 ) -> Result<()> {
     check_header_hash(new_block, target)?;
     check_prev_block_hash(new_block, prev_block)?;
 
     if new_block.header.timestamp <= median_time as u64 {
-        return string_error!("Timestamp is not greater than median of last 10 blocks");
+        return Err(Error::BlockValidationError(
+            "Header timestamp less than network time".into(),
+        ));
     }
 
     if calc_merkle_root(&new_block.txn_list) != new_block.header.merkle_root {
-        return string_error!("Merkle root was invalid");
+        return Err(Error::BlockValidationError("Invalid merkle root".into()));
     }
 
-    // check_txns(new_block, utxo_set)?;
+    if encode_block(&new_block).len() > 2 * median_size {
+        return Err(Error::BlockValidationError(
+            "Block was greater than double the median block size".into(),
+        ));
+    }
+
+    check_txns(new_block, utxo_set, block_height, median_size)?;
 
     Ok(())
 }
@@ -60,7 +72,9 @@ pub fn check_prev_block_hash(new_block: &Block, prev_block: &Block) -> Result<()
 
     // check the hash is what is included in new_block
     if prev_block_hash != new_block.header.prev_block_hash {
-        return string_error!("Header previous block hash didn't match previous block");
+        return Err(Error::BlockValidationError(
+            "The included header hash does not match the previous block".into(),
+        ));
     }
 
     Ok(())
@@ -73,7 +87,9 @@ pub fn check_header_hash(new_block: &Block, target: [u8; 32]) -> Result<()> {
 
     for i in 0..32 {
         if target[i] < current_block_hash[i] {
-            return string_error!("Header hash does not meet required difficulty");
+            return Err(Error::BlockValidationError(
+                "The hash of the header does not meet the required difficulty".into(),
+            ));
         } else if target[i] > current_block_hash[i] {
             break;
         }
@@ -214,6 +230,81 @@ pub fn to_compact_int_bytes(n: usize) -> Vec<u8> {
     }
 }
 
-fn check_txns(new_block: &Block, utxo_set: &UtxoSet) -> Result<()> {
-    todo!()
+// median block size is used to calculate block-reward slashing.
+pub fn check_txns(
+    new_block: &Block,
+    utxo_set: &UtxoSet,
+    blockheight: usize,
+    median_block_size: usize,
+) -> Result<()> {
+    let block_size = encode_block(new_block).len();
+    let mut coinbase = 1_000_000_000_000;
+
+    if block_size > median_block_size {
+        let penalty = (block_size as f64) / (median_block_size as f64);
+        coinbase = ((coinbase as f64) * penalty) as u64;
+    }
+
+    let mut value_of_inputs: u64 = 0;
+    let mut value_of_outputs: u64 = 0;
+
+    for (txn_i, txn) in new_block.txn_list.iter().enumerate() {
+        // skip the coinbase txn for now
+        if txn_i == 0 {
+            continue;
+        }
+
+        for (input_i, input) in txn.inputs.iter().enumerate() {
+            let spent_output = utxo_set
+                .get(&input.output_txid)
+                .ok_or(Error::BlockValidationError(
+                    "Referenced UTXO does not exist".into(),
+                ))?
+                .get(input.output_index)
+                .ok_or(Error::BlockValidationError(
+                    "Input tried to spend an output at an index that doesn't exist".into(),
+                ))?;
+
+            // Txn being in an Rc is a weird quirk from testing and should be removed eventually.
+            let context = Context {
+                txn: std::rc::Rc::new(txn.clone()),
+                blockheight,
+                utxo_blockheight: spent_output.block_height,
+            };
+
+            let mut full_script: Vec<u8> = vec![];
+            full_script.extend(input.unlocking_script.iter());
+            full_script.extend(spent_output.txn_output.locking_script.iter());
+            validate_script(&context, input_i, utxo_set)
+                .map_err(|e| Error::BlockValidationError(e.to_string()))?;
+
+            value_of_inputs += spent_output.txn_output.amount;
+        }
+
+        for output in txn.outputs.iter() {
+            value_of_outputs += output.amount;
+        }
+
+        if value_of_outputs > value_of_inputs {
+            return Err(Error::BlockValidationError(
+                "The sum of the outputs was greater than the sum of the inputs".into(),
+            ));
+        }
+    }
+
+    coinbase += value_of_inputs - value_of_outputs;
+    let coinbase_txn = &new_block.txn_list[0];
+
+    // now that
+    if !(coinbase_txn.outputs.len() == 1 && coinbase_txn.outputs[0].amount == coinbase) {
+        return Err(Error::BlockValidationError(
+            "Coinbase transaction is invalid".into(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn encode_block(block: &Block) -> Vec<u8> {
+    todo!();
 }
