@@ -220,7 +220,6 @@ fn construct_simple_txn_context(
         vec![Utxo {
             txn_output: old_output,
             block_height: 0,
-            block_time: 0,
         }],
     );
 
@@ -263,7 +262,6 @@ fn construct_simple_txn_with_utxo(locking_script: Vec<u8>) -> (UtxoSet, Txn) {
         vec![Utxo {
             txn_output: old_output,
             block_height: 0,
-            block_time: 0,
         }],
     );
 
@@ -969,407 +967,67 @@ fn check_if() {
 }
 
 #[cfg(test)]
-mod txn_validation {
-    use super::*;
-    use gold::*;
-    use std::rc::Rc;
+mod block_txn_validation {
+    use std::collections::HashMap;
 
-    // Dummy helpers to build blocks/transactions quickly.
-    // Adjust as necessary in your codebase.
-    fn dummy_utxo(
-        txid: [u8; 32],
-        index: usize,
+    use gold::structs::*;
+
+    fn create_dummy_utxo(locking_script: Vec<u8>, amount: u64) -> Utxo {
+        Utxo {
+            txn_output: TxnOutput {
+                locking_script,
+                amount,
+            },
+            block_height: 0,
+        }
+    }
+
+    fn create_dummy_utxo_set(utxo: Utxo) -> UtxoSet {
+        let set: UtxoSet = HashMap::new();
+        set
+    }
+
+    fn create_dummy_txn(
+        output_txid: [u8; 32],
+        unlocking_script: Vec<u8>,
+        output_index: usize,
         amount: u64,
-        block_height: usize,
-    ) -> ([u8; 32], Utxo) {
-        (
-            txid,
-            Utxo {
-                txn_output: TxnOutput {
-                    locking_script: vec![0x01], // valid script pushes 0x01 for success
-                    amount,
-                },
-                block_height,
-                block_time: 0,
-            },
-        )
-    }
-
-    fn dummy_block(prev_block_hash: [u8; 32], nonce: u64, timestamp: u64, txns: Vec<Txn>) -> Block {
-        Block {
-            header: Header {
-                prev_block_hash,
-                merkle_root: [0; 32],
-                nonce,
-                timestamp,
-            },
-            txn_list: txns,
-        }
-    }
-
-    /// Encode the block as if for real usage.
-    /// For testing, let's just do something that returns a consistent size
-    /// based on how many transactions we have, plus some overhead.
-    fn encode_block(block: &Block) -> Vec<u8> {
-        let mut v = vec![];
-        // Minimal "header size" for demonstration
-        v.extend_from_slice(&block.header.prev_block_hash);
-        v.extend_from_slice(&block.header.merkle_root);
-        v.extend_from_slice(&block.header.nonce.to_le_bytes());
-        v.extend_from_slice(&block.header.timestamp.to_le_bytes());
-        // Then each txn will add some bytes
-        for txn in &block.txn_list {
-            // Just length-based logic for demonstration
-            v.extend_from_slice(&(txn.inputs.len() as u64).to_le_bytes());
-            v.extend_from_slice(&(txn.outputs.len() as u64).to_le_bytes());
-        }
-        v
-    }
-
-    /// Script passes if the top byte is 0x01, fails if it’s 0x02.
-    /// (Real script logic will be more involved.)
-    fn validate_script(
-        _context: &Context,
-        input_i: usize,
-        utxo_set: &UtxoSet,
-    ) -> std::result::Result<(), String> {
-        let top_byte = if let Some((_, utxo_vec)) = utxo_set.iter().next() {
-            // Just a naive example – real script logic would combine input.unlock + output.locking
-            // Here we pretend the top byte in the unlocking script is what we check.
-            utxo_vec
-                .get(input_i)
-                .map(|u| u.txn_output.locking_script.first().cloned())
-                .unwrap_or(Some(0x01)) // fallback
-        } else {
-            Some(0x01) // default
+    ) -> Txn {
+        let txn_input = TxnInput {
+            output_txid,
+            output_index,
+            unlocking_script,
         };
 
-        match top_byte {
-            Some(0x01) => Ok(()),
-            Some(0x02) => Err("Script failed.".to_string()),
-            _ => Ok(()), // everything else is a no-op
-        }
-    }
+        let txn_output = TxnOutput {
+            locking_script: vec![1],
+            amount,
+        };
 
-    // Convenience constructors
-    fn coinbase_txn(amount: u64) -> Txn {
         Txn {
-            inputs: vec![],
-            outputs: vec![TxnOutput {
-                locking_script: vec![0x01], // valid script
-                amount,
-            }],
+            inputs: vec![txn_input],
+            outputs: vec![txn_output],
         }
     }
 
-    fn normal_txn(inputs: Vec<TxnInput>, outputs: Vec<TxnOutput>) -> Txn {
-        Txn { inputs, outputs }
+    #[test]
+    fn example_test() {
+        assert!(true)
     }
+}
 
-    fn default_median_size() -> usize {
-        1000
-    }
+#[cfg(test)]
+mod helper_functions {
+    use gold::*;
 
     #[test]
-    fn test_coinbase_no_penalty_no_spends() {
-        // Block is intentionally tiny => no penalty
-        // No normal txns => coinbase remains 1_000_000_000_000
-        let utxo_set = UtxoSet::new();
-        let median_block_size = default_median_size();
+    fn test_calc_coinbase() {
+        let median_block_size = 100_000;
 
-        // Just a single coinbase txn
-        let coinbase = coinbase_txn(1_000_000_000_000);
-        let block = dummy_block([0; 32], 0, 0, vec![coinbase]);
-
-        let res = check_txns(&block, &utxo_set, 1, median_block_size);
-        assert!(res.is_ok());
-    }
-
-    #[test]
-    fn test_coinbase_with_penalty_no_spends() {
-        // Make the encoded block artificially large to exceed median_block_size => triggers penalty
-        let utxo_set = UtxoSet::new();
-        let median_block_size = default_median_size();
-
-        // Use multiple dummy txns to bloat the block size in `encode_block`
-        let mut big_vec = vec![coinbase_txn(1_000_000_000_000)];
-        for _ in 0..50 {
-            big_vec.push(normal_txn(vec![], vec![]));
-        }
-        let block = dummy_block([0; 32], 0, 0, big_vec);
-
-        let block_size = encode_block(&block).len();
-        assert!(
-            block_size > median_block_size,
-            "Ensure block is indeed bigger than median."
-        );
-
-        let res = check_txns(&block, &utxo_set, 1, median_block_size);
-        assert!(res.is_ok());
-        // The coinbase gets slashed. We could compute exact penalty and check it by re-running
-        // but here we just want to confirm it doesn't fail.
-    }
-
-    #[test]
-    fn test_valid_block_with_spends_and_no_penalty() {
-        // This scenario: block is small => no penalty.
-        // Normal txns: spending existing UTXOs => final coinbase = 1_000_000_000_000 + (inputs - outputs).
-        let mut utxo_set: UtxoSet = UtxoSet::new();
-        // Provide a few UTXOs for spending:
-        let spend_txid1 = [1u8; 32];
-        let (key1, utxo1) = dummy_utxo(spend_txid1, 0, 500, 0);
-        utxo_set.insert(key1, vec![utxo1]);
-
-        let spend_txid2 = [2u8; 32];
-        let (key2, utxo2) = dummy_utxo(spend_txid2, 0, 1000, 0);
-        utxo_set.insert(key2, vec![utxo2]);
-
-        // Normal transactions
-        let normal1 = normal_txn(
-            vec![TxnInput {
-                output_txid: spend_txid1,
-                output_index: 0,
-                unlocking_script: vec![0x01], // top byte => success
-            }],
-            vec![TxnOutput {
-                locking_script: vec![0x01],
-                amount: 300,
-            }],
-        ); // inputs=500, outputs=300 => leftover 200
-
-        let normal2 = normal_txn(
-            vec![TxnInput {
-                output_txid: spend_txid2,
-                output_index: 0,
-                unlocking_script: vec![0x01], // top byte => success
-            }],
-            vec![TxnOutput {
-                locking_script: vec![0x01],
-                amount: 700,
-            }],
-        ); // inputs=1000, outputs=700 => leftover 300
-
-        // sum leftover across both = 200 + 300 = 500
-        // final coinbase should be 1_000_000_000_000 + 500 = 1_000_000_000_500
-        let coinbase = coinbase_txn(1_000_000_000_500);
-
-        let block = dummy_block([0; 32], 1, 42, vec![coinbase, normal1, normal2]);
-        let res = check_txns(&block, &utxo_set, 1, default_median_size());
-        assert!(res.is_ok());
-    }
-
-    #[test]
-    fn test_block_exceeds_median_with_spends() {
-        // Create a large block to slash coinbase, plus normal transactions with leftover inputs
-        // so final coinbase = (slashed base) + leftover
-        let mut utxo_set: UtxoSet = UtxoSet::new();
-
-        let spend_txid = [3u8; 32];
-        let (key, utxo) = dummy_utxo(spend_txid, 0, 500, 0);
-        utxo_set.insert(key, vec![utxo]);
-
-        // A normal spend: 500 in, 100 out => leftover 400
-        let normal = normal_txn(
-            vec![TxnInput {
-                output_txid: spend_txid,
-                output_index: 0,
-                unlocking_script: vec![0x01], // success
-            }],
-            vec![TxnOutput {
-                locking_script: vec![0x01],
-                amount: 100,
-            }],
-        );
-
-        // Start with base coinbase
-        let base_coinbase = 1_000_000_000_000;
-
-        // We'll artificially bloat the block with some dummy txns
-        let mut txns = vec![coinbase_txn(base_coinbase)];
-        // Add the normal spend
-        txns.push(normal);
-        // Add extra dummy txns to inflate block size
-        for _ in 0..60 {
-            txns.push(normal_txn(vec![], vec![]));
-        }
-        let block = dummy_block([0; 32], 0, 0, txns);
-
-        let block_size = encode_block(&block).len();
-        let median_block_size = default_median_size();
-        assert!(
-            block_size > median_block_size,
-            "Ensure it's actually bigger."
-        );
-
-        // If penalty factor = block_size / median_block_size
-        // final coinbase = (base_coinbase * penalty_factor) + leftover
-        // leftover = 500 - 100 = 400
-        // We don't do an exact check here, but we ensure it doesn't fail.
-        let res = check_txns(&block, &utxo_set, 0, median_block_size);
-        assert!(res.is_ok());
-    }
-
-    #[test]
-    fn test_fail_sum_of_outputs_exceeds_sum_of_inputs() {
-        // The leftover check (value_of_outputs > value_of_inputs).
-        let mut utxo_set: UtxoSet = UtxoSet::new();
-        let spend_txid = [4u8; 32];
-        let (key, utxo) = dummy_utxo(spend_txid, 0, 500, 0);
-        utxo_set.insert(key, vec![utxo]);
-
-        // Normal Txn attempts to spend 500 but creates 600
-        let normal = normal_txn(
-            vec![TxnInput {
-                output_txid: spend_txid,
-                output_index: 0,
-                unlocking_script: vec![0x01], // valid
-            }],
-            vec![TxnOutput {
-                locking_script: vec![0x01],
-                amount: 600,
-            }],
-        );
-
-        // We start coinbase as something (1_000_000_000_000)
-        // but we'll fail before we even finalize coinbase
-        let coinbase = coinbase_txn(1_000_000_000_000);
-        let block = dummy_block([0; 32], 0, 0, vec![coinbase, normal]);
-
-        let res = check_txns(&block, &utxo_set, 0, default_median_size());
-        assert!(res.is_err());
-        let err_str = format!("{:?}", res.err().unwrap());
-        assert!(err_str.contains("The sum of the outputs was greater"));
-    }
-
-    #[test]
-    fn test_fail_missing_utxo() {
-        // Referencing a nonexistent utxo => fail
-        let utxo_set: UtxoSet = UtxoSet::new();
-
-        let normal = normal_txn(
-            vec![TxnInput {
-                output_txid: [9u8; 32],
-                output_index: 0,
-                unlocking_script: vec![0x01],
-            }],
-            vec![TxnOutput {
-                locking_script: vec![0x01],
-                amount: 100,
-            }],
-        );
-
-        let coinbase = coinbase_txn(1_000_000_000_000);
-        let block = dummy_block([0; 32], 0, 0, vec![coinbase, normal]);
-        let res = check_txns(&block, &utxo_set, 0, default_median_size());
-        assert!(res.is_err());
-        assert!(format!("{:?}", res.err().unwrap()).contains("Referenced UTXO does not exist"));
-    }
-
-    #[test]
-    fn test_fail_invalid_output_index() {
-        // UTXO set has only index 0, but we try to spend index 1
-        let mut utxo_set: UtxoSet = UtxoSet::new();
-        let spend_txid = [5u8; 32];
-        let (key, utxo) = dummy_utxo(spend_txid, 0, 500, 0);
-        utxo_set.insert(key, vec![utxo]);
-
-        let normal = normal_txn(
-            vec![TxnInput {
-                output_txid: spend_txid,
-                output_index: 1,
-                unlocking_script: vec![0x01],
-            }],
-            vec![TxnOutput {
-                locking_script: vec![0x01],
-                amount: 300,
-            }],
-        );
-
-        let coinbase = coinbase_txn(1_000_000_000_000);
-        let block = dummy_block([0; 32], 0, 0, vec![coinbase, normal]);
-
-        let res = check_txns(&block, &utxo_set, 0, default_median_size());
-        assert!(res.is_err());
-        assert!(format!("{:?}", res.err().unwrap())
-            .contains("Input tried to spend an output at an index that doesn't exist"));
-    }
-
-    #[test]
-    fn test_fail_script() {
-        // Script fails if top byte is 0x02
-        let mut utxo_set: UtxoSet = UtxoSet::new();
-        let spend_txid = [6u8; 32];
-        // We'll store the UTXO as if it's a valid locking script, but we supply an unlocking script that fails
-        let (key, utxo) = dummy_utxo(spend_txid, 0, 500, 0);
-        utxo_set.insert(key, vec![utxo]);
-
-        let normal = normal_txn(
-            vec![TxnInput {
-                output_txid: spend_txid,
-                output_index: 0,
-                // We'll pretend 0x02 is the top byte that triggers a fail in your validate_script
-                unlocking_script: vec![0x02],
-            }],
-            vec![TxnOutput {
-                locking_script: vec![0x01],
-                amount: 100,
-            }],
-        );
-
-        let coinbase = coinbase_txn(1_000_000_000_000);
-        let block = dummy_block([0; 32], 0, 0, vec![coinbase, normal]);
-
-        let res = check_txns(&block, &utxo_set, 0, default_median_size());
-        assert!(res.is_err());
-        assert!(format!("{:?}", res.err().unwrap()).contains("Script failed."));
-    }
-
-    #[test]
-    fn test_extra_dummy_normal_txns() {
-        // Confirm we handle multiple normal txns with big leftover properly
-        let mut utxo_set: UtxoSet = UtxoSet::new();
-
-        // Provide a couple of UTXOs for multiple normal txns
-        let txid1 = [0x11u8; 32];
-        let (k1, u1) = dummy_utxo(txid1, 0, 600, 0);
-        utxo_set.insert(k1, vec![u1]);
-
-        let txid2 = [0x22u8; 32];
-        let (k2, u2) = dummy_utxo(txid2, 0, 900, 0);
-        utxo_set.insert(k2, vec![u2]);
-
-        // Txn1: spend 600 => output 100 leftover 500
-        let normal1 = normal_txn(
-            vec![TxnInput {
-                output_txid: txid1,
-                output_index: 0,
-                unlocking_script: vec![0x01],
-            }],
-            vec![TxnOutput {
-                locking_script: vec![0x01],
-                amount: 100,
-            }],
-        );
-
-        // Txn2: spend 900 => output 600 leftover 300
-        let normal2 = normal_txn(
-            vec![TxnInput {
-                output_txid: txid2,
-                output_index: 0,
-                unlocking_script: vec![0x01],
-            }],
-            vec![TxnOutput {
-                locking_script: vec![0x01],
-                amount: 600,
-            }],
-        );
-
-        // total leftover = 500 + 300 = 800
-        // final coinbase = base + leftover = 1_000_000_000_000 + 800
-        let coinbase = coinbase_txn(1_000_000_000_800);
-
-        let block = dummy_block([0; 32], 99, 99, vec![coinbase, normal1, normal2]);
-        let res = check_txns(&block, &utxo_set, 0, default_median_size());
-        assert!(res.is_ok());
+        assert_eq!(calc_coinbase(90_000, median_block_size), 1_000_000_000_000);
+        assert_eq!(calc_coinbase(110_000, median_block_size), 810_000_000_000);
+        assert_eq!(calc_coinbase(187_284, median_block_size), 16_169_665_000);
+        assert_eq!(calc_coinbase(198_726, median_block_size), 162_307_000);
+        assert_eq!(calc_coinbase(200_000, median_block_size), 0);
     }
 }

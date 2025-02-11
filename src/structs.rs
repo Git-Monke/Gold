@@ -35,5 +35,4 @@ pub type UtxoSet = std::collections::HashMap<[u8; 32], Vec<Utxo>>;
 pub struct Utxo {
     pub txn_output: TxnOutput,
     pub block_height: usize,
-    pub block_time: usize,
 }

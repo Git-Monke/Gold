@@ -230,7 +230,26 @@ pub fn to_compact_int_bytes(n: usize) -> Vec<u8> {
     }
 }
 
+// f64 calculations aren't deterministic, so instead we have to limit the precision used in the calculation
+// I have chosen 9 decimal places. This includes the trillionths place. In other words: all calculations should be 1 trillion or less, and end in 4 zeros.
+pub fn calc_coinbase(block_size: usize, median_block_size: usize) -> u64 {
+    let base = 1_000_000_000f64;
+
+    let block_size = block_size as f64;
+    let median_block_size = median_block_size as f64;
+
+    if block_size > median_block_size {
+        // calculate fraction, multiplfy by base, convert to u64 to cut off the non-deterministic decimal places, add back the precision.
+        (base * (1f64 - ((block_size - median_block_size) / (median_block_size))).powi(2)) as u64
+            * 1_000
+    } else {
+        1_000_000_000_000
+    }
+}
+
 // median block size is used to calculate block-reward slashing.
+// This functions validates all of the txns inside a block. I should have a seperate function for txn validation,
+// but there are some other values like txn fees.
 pub fn check_txns(
     new_block: &Block,
     utxo_set: &UtxoSet,
@@ -238,20 +257,34 @@ pub fn check_txns(
     median_block_size: usize,
 ) -> Result<()> {
     let block_size = encode_block(new_block).len();
-    let mut coinbase = 1_000_000_000_000;
+    let mut coinbase = calc_coinbase(block_size, median_block_size);
+    let mut fees = 0;
 
-    if block_size > median_block_size {
-        let penalty = (block_size as f64) / (median_block_size as f64);
-        coinbase = ((coinbase as f64) * penalty) as u64;
+    if new_block.txn_list.len() < 1 {
+        return Err(Error::BlockValidationError(
+            "Block must have at least 1 txn".into(),
+        ));
     }
 
-    let mut value_of_inputs: u64 = 0;
-    let mut value_of_outputs: u64 = 0;
+    if new_block.txn_list[0].inputs.len() != 0 || new_block.txn_list[0].outputs.len() != 1 {
+        return Err(Error::BlockValidationError(
+            "Coinbase txn had an invalid number of inputs or outputs".into(),
+        ));
+    }
 
     for (txn_i, txn) in new_block.txn_list.iter().enumerate() {
-        // skip the coinbase txn for now
+        let mut value_of_inputs: u64 = 0;
+        let mut value_of_outputs: u64 = 0;
+
+        // skip the coinbase txn since it has special validation rules.
         if txn_i == 0 {
             continue;
+        }
+
+        if txn.inputs.len() < 1 {
+            return Err(Error::BlockValidationError(
+                "A transaction had no inputs".into(),
+            ));
         }
 
         for (input_i, input) in txn.inputs.iter().enumerate() {
@@ -287,18 +320,22 @@ pub fn check_txns(
 
         if value_of_outputs > value_of_inputs {
             return Err(Error::BlockValidationError(
-                "The sum of the outputs was greater than the sum of the inputs".into(),
+                "A txn output more than it input".into(),
             ));
+        }
+
+        if value_of_outputs < value_of_inputs {
+            fees += value_of_inputs - value_of_outputs;
         }
     }
 
-    coinbase += value_of_inputs - value_of_outputs;
+    coinbase += fees;
     let coinbase_txn = &new_block.txn_list[0];
 
-    // now that
-    if !(coinbase_txn.outputs.len() == 1 && coinbase_txn.outputs[0].amount == coinbase) {
+    // now that txn fees have been calculated, we can check the final coinbase txn
+    if !(coinbase_txn.outputs[0].amount == coinbase) {
         return Err(Error::BlockValidationError(
-            "Coinbase transaction is invalid".into(),
+            "Coinbase transaction amount is invalid".into(),
         ));
     }
 
@@ -306,5 +343,29 @@ pub fn check_txns(
 }
 
 fn encode_block(block: &Block) -> Vec<u8> {
-    todo!();
+    let mut block_data = vec![];
+    let header_data = encode_header(&block.header);
+
+    block_data.extend(header_data.iter());
+
+    for txn in block.txn_list.iter() {
+        let txn_data = encode_txn(txn);
+        block_data.extend(txn_data);
+    }
+
+    block_data
+}
+
+fn encode_block_without_coinbase(block: &Block) -> Vec<u8> {
+    let mut block_data = vec![];
+    let header_data = encode_header(&block.header);
+
+    block_data.extend(header_data.iter());
+
+    for txn in block.txn_list[1..].iter() {
+        let txn_data = encode_txn(txn);
+        block_data.extend(txn_data);
+    }
+
+    block_data
 }
