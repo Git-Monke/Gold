@@ -970,7 +970,8 @@ fn check_if() {
 mod block_txn_validation {
     use std::collections::HashMap;
 
-    use gold::structs::*;
+    use gold::Error::BlockValidationError;
+    use gold::{check_txns, create_coinbase_txn, structs::*};
 
     fn create_dummy_utxo(locking_script: Vec<u8>, amount: u64) -> Utxo {
         Utxo {
@@ -982,7 +983,7 @@ mod block_txn_validation {
         }
     }
 
-    fn create_dummy_utxo_set(utxo: Utxo) -> UtxoSet {
+    fn create_dummy_utxo_set() -> UtxoSet {
         let set: UtxoSet = HashMap::new();
         set
     }
@@ -1010,9 +1011,103 @@ mod block_txn_validation {
         }
     }
 
+    fn create_dummy_block() -> Block {
+        Block {
+            header: Header {
+                prev_block_hash: [0; 32],
+                merkle_root: [0; 32],
+                nonce: 0,
+                timestamp: 0,
+            },
+            txn_list: vec![Txn {
+                inputs: vec![],
+                outputs: vec![],
+            }],
+        }
+    }
+
     #[test]
-    fn example_test() {
-        assert!(true)
+    fn test_correct_block() {
+        let mut set = create_dummy_utxo_set();
+
+        let utxo = create_dummy_utxo(vec![1], 1000);
+        set.insert([0; 32], vec![utxo]);
+
+        let txn = create_dummy_txn([0; 32], vec![1], 0, 1000);
+
+        let mut block = create_dummy_block();
+        block.txn_list.push(txn);
+
+        let coinbase_txn = create_coinbase_txn(&block, &set, 50_000, vec![1]);
+        block.txn_list[0] = coinbase_txn;
+
+        assert_eq!(check_txns(&block, &set, 0, 50_000), Ok(()))
+    }
+
+    #[test]
+    fn test_invalid_txn() {
+        let mut set = create_dummy_utxo_set();
+
+        let utxo = create_dummy_utxo(vec![2], 1000);
+        set.insert([0; 32], vec![utxo]);
+
+        let txn = create_dummy_txn([0; 32], vec![2], 0, 1000);
+
+        let mut block = create_dummy_block();
+        block.txn_list.push(txn);
+
+        let coinbase_txn = create_coinbase_txn(&block, &set, 50_000, vec![1]);
+        block.txn_list[0] = coinbase_txn;
+
+        assert_eq!(
+            check_txns(&block, &set, 0, 50_000),
+            Err(gold::Error::BlockValidationError(
+                "The script failed to produce a stack with 1 at the top after executing".into()
+            ))
+        )
+    }
+
+    #[test]
+    fn test_invalid_coinbase() {
+        let mut set = create_dummy_utxo_set();
+
+        let utxo = create_dummy_utxo(vec![1], 1000);
+        set.insert([0; 32], vec![utxo]);
+
+        let txn = create_dummy_txn([0; 32], vec![1], 0, 1000);
+
+        let mut block = create_dummy_block();
+        block.txn_list.push(txn);
+
+        let mut coinbase_txn = create_coinbase_txn(&block, &set, 50_000, vec![1]);
+        coinbase_txn.outputs[0].amount = 100_000_000_000_000;
+        block.txn_list[0] = coinbase_txn;
+
+        assert_eq!(
+            check_txns(&block, &set, 0, 50_000),
+            Err(BlockValidationError(
+                "Coinbase transaction amount is invalid".into()
+            ))
+        )
+    }
+
+    #[test]
+    fn test_txn_fees() {
+        let mut set = create_dummy_utxo_set();
+
+        let utxo = create_dummy_utxo(vec![1], 1000);
+        set.insert([0; 32], vec![utxo]);
+
+        let txn = create_dummy_txn([0; 32], vec![1], 0, 900);
+
+        let mut block = create_dummy_block();
+        block.txn_list.push(txn);
+
+        let coinbase_txn = create_coinbase_txn(&block, &set, 50_000, vec![1]);
+        block.txn_list[0] = coinbase_txn;
+
+        assert_eq!(block.txn_list[0].outputs[0].amount, 1_000_000_000_100);
+        assert_eq!(check_txns(&block, &set, 0, 50_000), Ok(()))
     }
 }
 

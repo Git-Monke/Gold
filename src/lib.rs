@@ -238,7 +238,7 @@ pub fn calc_coinbase(block_size: usize, median_block_size: usize) -> u64 {
     let block_size = block_size as f64;
     let median_block_size = median_block_size as f64;
 
-    if block_size > median_block_size {
+    if block_size > 50_000f64 && block_size > median_block_size {
         // calculate fraction, multiplfy by base, convert to u64 to cut off the non-deterministic decimal places, add back the precision.
         (base * (1f64 - ((block_size - median_block_size) / (median_block_size))).powi(2)) as u64
             * 1_000
@@ -368,4 +368,45 @@ fn encode_block_without_coinbase(block: &Block) -> Vec<u8> {
     }
 
     block_data
+}
+
+// Takes a block without a coinbase txn and creates a coinbase txn that is valid
+// ASSUMES THAT ALL TXNS HAVE BEEN VALIDATED!
+pub fn create_coinbase_txn(
+    block: &Block,
+    utxo_set: &UtxoSet,
+    median_block_size: usize,
+    locking_script: Vec<u8>,
+) -> Txn {
+    let mut fees = 0;
+
+    for txn in block.txn_list.iter() {
+        let sum_of_inputs: u64 = txn
+            .inputs
+            .iter()
+            .map(|input| {
+                utxo_set.get(&input.output_txid).unwrap()[input.output_index]
+                    .txn_output
+                    .amount
+            })
+            .sum();
+
+        let sum_of_outputs: u64 = txn.outputs.iter().map(|output| output.amount).sum();
+
+        if sum_of_inputs > sum_of_outputs {
+            fees += sum_of_inputs - sum_of_outputs;
+        }
+    }
+
+    // assumes the block do
+    let block_size = encode_block(block).len();
+    let amount = calc_coinbase(block_size, median_block_size) + fees;
+
+    Txn {
+        inputs: vec![],
+        outputs: vec![TxnOutput {
+            locking_script,
+            amount,
+        }],
+    }
 }
